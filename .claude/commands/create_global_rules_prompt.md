@@ -78,6 +78,37 @@ Create a `CLAUDE.md` file (or similar global rules file) following this structur
       - Only show code when actively implementing (not when explaining)
       - Use status indicators for progress (⚪🟡🟢🔴 or similar)
 
+12. **Service Configuration** (for AI Agent Projects)
+    - Include this section only if the project is an AI agent with external service integrations
+    - Document which services the agent uses and how to configure them
+    - Specify environment variables for API keys and credentials
+    - Note any test accounts or sandbox endpoints for validation
+    - Reference `.agents/services.yaml` for structured service configuration:
+      ```yaml
+      services:
+        openai:
+          auth_env: OPENAI_API_KEY
+          health: /models
+        postgres:
+          auth_env: DATABASE_URL
+          skip: false  # include in validation
+      ```
+    - This enables the validation system to test integrations automatically
+
+13. **Planning Workflow** (for projects using PIV loop)
+    - Document the plan-feature two-phase process if the project uses `/plan-feature`:
+      1. **Scope Analysis**: Output recommendations with justifications to terminal
+      2. **Plan Generation**: Create plan only after user validates approach
+    - Explain that recommendations must include WHY:
+      - Reference PRD requirements or user stories
+      - Reference codebase patterns that inform the choice
+      - Explain how the recommendation serves the implementation goal
+    - Note the conversational validation checkpoint:
+      - User reviews recommendations in terminal
+      - Confirms or discusses changes
+      - Plan generated with validated decisions baked in
+    - This ensures plans are solid before execution begins
+
 ## Process to Follow:
 
 ### For Existing Projects:

@@ -30,7 +30,75 @@ Transform a feature request into a **comprehensive implementation plan** through
 
 **Key Philosophy**: Context is King. The plan must contain ALL information needed for implementation - patterns, mandatory reading, documentation, validation commands - so the execution agent succeeds on the first attempt.
 
+**Two-Phase Process** (when PRD exists):
+1. **Scope Analysis** → Output recommendations with justifications to terminal → User validates
+2. **Plan Generation** → Create implementation plan with validated decisions baked in
+
 ## Planning Process
+
+> **Note:** If a PRD exists, start with Phase 0 (Scope Analysis) and output recommendations to terminal. Proceed to Phase 1 only after user validates the approach.
+
+### Phase 0: Scope Analysis & Recommendations (If PRD Exists)
+
+> **When to run this phase:** If a PRD exists for the project (`.agents/PRD.md` or similar), run this phase FIRST. Output recommendations to terminal, wait for user validation, then proceed to Phase 1.
+
+**If no PRD exists:** Skip Phase 0 and proceed directly to Phase 1.
+
+**Scope Analysis Process:**
+
+1. **Read the PRD Phase**
+   - Identify which phase is being planned (from user input or PRD "Current Focus")
+   - Extract: What this phase delivers, prerequisites, scope (included/excluded)
+   - Extract: User stories addressed by this phase
+
+2. **Map User Stories**
+   - For each user story in scope, extract acceptance criteria
+   - These become validation checkpoints for the plan
+
+3. **Identify Decision Points**
+   - Find "Discussion Points for Clarification" in the PRD phase
+   - Find any ambiguous requirements or multiple valid approaches
+   - List each decision that affects implementation
+
+4. **Formulate Recommendations**
+   - For each decision point, provide a recommendation with justification
+   - Justification must reference PRD context, user stories, or codebase patterns
+   - Format: Decision → Recommendation → Why (how it serves the goal)
+
+**Terminal Output Format:**
+
+```
+## Scope Analysis: [Phase Name]
+
+**PRD Phase:** [N] - [Name]
+**User Stories:** US-XXX, US-XXX
+**Prerequisites:** [Status of each - ✅ Complete / ⚪ Not Started / 🔴 Blocked]
+
+### What This Phase Delivers
+[2-3 sentence summary from PRD]
+
+### Recommendations
+
+1. **[Decision Point from PRD Discussion Points]**
+   → [Your recommendation]
+   Why: [Justification - how this serves the user story/goal, references to
+   PRD requirements or codebase patterns that inform this choice]
+
+2. **[Another Decision Point]**
+   → [Your recommendation]
+   Why: [Justification]
+
+[Continue for all decision points...]
+
+---
+
+Ready to generate plan with these decisions, or would you like to discuss any recommendations?
+```
+
+**After User Validation:**
+- If user confirms: Proceed to Phase 1 with decisions locked in
+- If user adjusts: Update recommendations, confirm again
+- Document final decisions in the plan's NOTES section
 
 ### Phase 1: Feature Understanding
 
@@ -294,6 +362,44 @@ So that <benefit/value>
 - Create integration tests for feature workflow
 - Add edge case tests
 - Validate against acceptance criteria
+
+---
+
+## VALIDATION STRATEGY
+
+> Define what the validation system should test for THIS phase specifically.
+
+### Tools to Validate
+
+| Tool | Test Inputs | Expected Behavior | Mock Needed |
+|------|-------------|-------------------|-------------|
+| [Tool name] | [Sample inputs] | [Expected output/behavior] | [Yes/No + why] |
+
+### Workflows to Test
+
+| Workflow | Happy Path | Error Paths | State Changes |
+|----------|------------|-------------|---------------|
+| [Name] | [Steps to verify] | [Error cases] | [State to check] |
+
+### Integration Points
+
+List external services touched by this phase:
+- **[Service]**: What operations, how to verify connectivity
+- Note any rate limits or test account requirements
+
+### Mock Data Needs
+
+| Scenario | Data Shape | Edge Cases |
+|----------|------------|------------|
+| [Scenario] | [Fields needed] | [Empty/error/timeout/malformed] |
+
+### Validation Acceptance Criteria
+
+- [ ] All tools execute without error with valid inputs
+- [ ] All tools handle invalid inputs gracefully
+- [ ] All workflow happy paths complete successfully
+- [ ] All documented error paths are handled
+- [ ] Integration points are reachable (or gracefully fail)
 
 ---
 

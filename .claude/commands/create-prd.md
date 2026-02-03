@@ -113,7 +113,50 @@ This constraint exists because:
 
 ---
 
-### **7. Technology Stack** (30-40 lines)
+### **7. Agent Validation Profile** (OPTIONAL - 40-60 lines)
+
+> **Include this section ONLY for AI agent projects** - applications with tools, external service integrations, or autonomous workflows. Skip entirely for standard web apps, APIs, or CLIs.
+
+**When to include:**
+- Project uses MCP tools or agent frameworks
+- Project calls external APIs autonomously
+- Project has multi-step workflows or conversation flows
+- Project makes decisions based on external data
+
+**Services Inventory:**
+
+| Service | Purpose | Auth Type | Env Var |
+|---------|---------|-----------|---------|
+| [Service Name] | [What it does] | [api_key/oauth/none] | [ENV_VAR_NAME] |
+
+**Tools Inventory:**
+
+| Tool Name | Type | External Dependencies |
+|-----------|------|----------------------|
+| [Tool] | [MCP/internal/API] | [Services it calls] |
+
+**Workflow Paths:**
+
+Document key user-facing workflows:
+- **[Workflow Name]**: [Brief description of steps and decision points]
+- Note branching paths and error recovery flows
+
+**Error Scenarios:**
+
+List critical error cases that must be tested:
+- Service unavailable handling
+- Invalid input handling
+- Rate limit handling
+- Authentication failure handling
+
+**Mock Requirements:**
+
+Identify scenarios requiring mock data:
+- [Scenario]: Why mocking needed, what shape of data
+
+---
+
+### **8. Technology Stack** (30-40 lines)
 
 | Component | Technology | Version |
 |-----------|------------|---------|
@@ -126,7 +169,7 @@ This constraint exists because:
 
 ---
 
-### **8. Current Focus** (20-30 lines)
+### **9. Current Focus** (20-30 lines)
 
 > **Update this section at the start of each development session.**
 
@@ -148,7 +191,7 @@ This constraint exists because:
 
 ---
 
-### **9. Implementation Phases** (150-200 lines)
+### **10. Implementation Phases** (150-200 lines)
 
 > **WORKFLOW CONTEXT:** Each phase is a **self-contained brief** for the `/plan-feature` command. After `/clear` and `/prime`, the user reads a phase, discusses clarifications, then runs `/plan-feature`. Write phases to enable this workflow.
 
@@ -200,7 +243,7 @@ Break MVP into 3-4 phases. Each phase: 40-60 lines.
 
 ---
 
-### **10. Success Criteria** (30-40 lines)
+### **11. Success Criteria** (30-40 lines)
 
 **MVP is successful when:**
 1. [User can do X]
@@ -216,7 +259,7 @@ Break MVP into 3-4 phases. Each phase: 40-60 lines.
 
 ---
 
-### **11. Risks & Mitigations** (20-30 lines)
+### **12. Risks & Mitigations** (20-30 lines)
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
@@ -225,7 +268,7 @@ Break MVP into 3-4 phases. Each phase: 40-60 lines.
 
 ---
 
-### **12. Document History** (10-15 lines)
+### **13. Document History** (10-15 lines)
 
 | Date | Version | Changes |
 |------|---------|---------|
@@ -261,6 +304,7 @@ Break MVP into 3-4 phases. Each phase: 40-60 lines.
 - [ ] Phases reference user stories
 - [ ] Current Focus section included
 - [ ] Status indicators on stories and phases
+- [ ] Agent Validation Profile included (if agent project)
 - [ ] Within 500-750 line limit
 
 ---

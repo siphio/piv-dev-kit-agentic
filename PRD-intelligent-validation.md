@@ -47,7 +47,7 @@ The Intelligent Validation System will act as a thorough QA engineer who underst
 **In Scope:**
 
 Core Functionality:
-- ✅ Pre-execution plan review command (`/review-plan`)
+- ✅ Enhanced plan-feature with scoping & recommendations phase
 - ✅ Post-execution intelligent validation command (`/validate-implementation`)
 - ✅ Subagent coordination for thorough testing
 - ✅ Auto-detection of services from codebase
@@ -56,7 +56,7 @@ Core Functionality:
 
 Framework Updates:
 - ✅ PRD template updates (Agent Validation Profile section)
-- ✅ Plan-feature updates (Validation Strategy section)
+- ✅ Plan-feature updates (Validation Strategy section + Scoping Phase)
 - ✅ Global rules updates (Service Configuration section)
 
 **Out of Scope:**
@@ -71,21 +71,21 @@ Framework Updates:
 
 ## 5. User Stories
 
-### US-001: Pre-Execution Plan Review
+### US-001: Pre-Planning Scope Analysis & Recommendations
 
-**As a** developer who just created an implementation plan
-**I want to** have the plan reviewed for issues before I start coding
-**So that** I catch problems early and don't waste time implementing flawed plans
+**As a** developer about to plan a feature implementation
+**I want to** see scope analysis and decision recommendations before the plan is generated
+**So that** I validate the approach early and the plan is generated with correct decisions baked in
 
 **Acceptance Criteria:**
-- [ ] Command reads the plan file and understands its scope
-- [ ] Identifies missing context, unclear tasks, bad assumptions
-- [ ] Validates referenced files/patterns actually exist
-- [ ] Outputs specific issues with recommended fixes
-- [ ] Provides confidence score for plan quality
+- [x] Plan-feature first outputs scope analysis to terminal
+- [x] Identifies all decision points from PRD phase and user stories
+- [x] Provides recommendations for each decision with justification
+- [x] Waits for user validation before generating plan
+- [x] Plan is generated with validated decisions (no ambiguity)
 
 **Phase:** Phase 2
-**Status:** ⚪ Not Started
+**Status:** 🟢 Complete
 
 ---
 
@@ -96,15 +96,15 @@ Framework Updates:
 **So that** I have confidence the phase is truly complete
 
 **Acceptance Criteria:**
-- [ ] Command reads plan, PRD phase, and user stories for context
-- [ ] Maps all implemented tools and workflows
-- [ ] Tests each tool with various inputs
-- [ ] Tests workflow paths end-to-end
-- [ ] Reports what passed/failed with root cause analysis
-- [ ] Suggests fixes for failures
+- [x] Command reads plan, PRD phase, and user stories for context
+- [x] Maps all implemented tools and workflows
+- [x] Tests each tool with various inputs
+- [x] Tests workflow paths end-to-end
+- [x] Reports what passed/failed with root cause analysis
+- [x] Suggests fixes for failures
 
 **Phase:** Phase 3
-**Status:** ⚪ Not Started
+**Status:** 🟢 Complete
 
 ---
 
@@ -115,14 +115,14 @@ Framework Updates:
 **So that** I know the integrations actually work in production
 
 **Acceptance Criteria:**
-- [ ] Auto-detects services from .env and codebase
-- [ ] Tests authentication flows
-- [ ] Tests actual API calls with real data
-- [ ] Handles rate limits gracefully
-- [ ] Reports service-specific issues clearly
+- [x] Auto-detects services from .env and codebase
+- [x] Tests authentication flows
+- [x] Tests actual API calls with real data
+- [x] Handles rate limits gracefully
+- [x] Reports service-specific issues clearly
 
 **Phase:** Phase 3
-**Status:** ⚪ Not Started
+**Status:** 🟢 Complete
 
 ---
 
@@ -133,13 +133,13 @@ Framework Updates:
 **So that** I can test error handling, empty states, and edge cases
 
 **Acceptance Criteria:**
-- [ ] Generates mocks based on API response schemas
-- [ ] Creates edge case scenarios (empty, error, timeout, malformed)
-- [ ] Mocks are realistic and match expected data shapes
-- [ ] Can test with mocks when real services unavailable
+- [x] Generates mocks based on API response schemas
+- [x] Creates edge case scenarios (empty, error, timeout, malformed)
+- [x] Mocks are realistic and match expected data shapes
+- [x] Can test with mocks when real services unavailable
 
 **Phase:** Phase 3
-**Status:** ⚪ Not Started
+**Status:** 🟢 Complete
 
 ---
 
@@ -150,14 +150,14 @@ Framework Updates:
 **So that** no path is left untested
 
 **Acceptance Criteria:**
-- [ ] Maps all workflow paths from user stories and code
-- [ ] Tests happy path for each workflow
-- [ ] Tests error/exception paths
-- [ ] Tests state transitions if agent maintains state
-- [ ] Reports coverage of paths tested
+- [x] Maps all workflow paths from user stories and code
+- [x] Tests happy path for each workflow
+- [x] Tests error/exception paths
+- [x] Tests state transitions if agent maintains state
+- [x] Reports coverage of paths tested
 
 **Phase:** Phase 3
-**Status:** ⚪ Not Started
+**Status:** 🟢 Complete
 
 ---
 
@@ -168,13 +168,13 @@ Framework Updates:
 **So that** I can quickly resolve issues without deep debugging
 
 **Acceptance Criteria:**
-- [ ] Root cause analysis for each failure
-- [ ] Specific code suggestions when applicable
-- [ ] Option to auto-apply simple fixes
-- [ ] Clear explanation of why the fix works
+- [x] Root cause analysis for each failure
+- [x] Specific code suggestions when applicable
+- [ ] Option to auto-apply simple fixes (deferred - MVP suggests only)
+- [x] Clear explanation of why the fix works
 
 **Phase:** Phase 3
-**Status:** ⚪ Not Started
+**Status:** 🟢 Complete
 
 ---
 
@@ -192,7 +192,7 @@ Framework Updates:
 - [ ] Validation requirements per phase specified
 
 **Phase:** Phase 1
-**Status:** ⚪ Not Started
+**Status:** 🟢 Complete
 
 ---
 
@@ -209,7 +209,7 @@ Framework Updates:
 - [ ] Integration points and mock needs specified
 
 **Phase:** Phase 1
-**Status:** ⚪ Not Started
+**Status:** 🟢 Complete
 
 ---
 
@@ -220,13 +220,13 @@ Framework Updates:
 **So that** validation has access to relevant docs and results persist across sessions
 
 **Acceptance Criteria:**
-- [ ] Validation queries Archon RAG for service documentation
-- [ ] Validation queries Archon for testing patterns/examples
-- [ ] Validation results logged to Archon task system
-- [ ] Can query past validation results from Archon
+- [x] Validation queries Archon RAG for service documentation
+- [x] Validation queries Archon for testing patterns/examples
+- [x] Validation results logged to Archon task system
+- [x] Can query past validation results from Archon
 
 **Phase:** Phase 3
-**Status:** ⚪ Not Started
+**Status:** 🟢 Complete
 
 ---
 
@@ -292,13 +292,22 @@ Specialist Subagents (spawned as needed):
 
 ## 8. Current Focus
 
-**Active Phase:** Phase 1 - Framework Foundation
-**Active Stories:** US-007, US-008
+**Active Phase:** Phase 4 - Integration & Iteration
+**Active Stories:** All (integration testing)
 **Status:** ⚪ Not Started
 
 **Blockers:** None
 
-**Session Context:** Initial PRD creation. Need to review and approve before planning Phase 1.
+**Session Context:**
+- Phase 1 complete: PRD, plan-feature, and global rules templates updated with validation sections
+- Phase 2 complete: Enhanced plan-feature with Phase 0 Scope Analysis & Recommendations
+- Phase 3 complete: /validate-implementation command created with all 5 subagents
+  - Tool Validator, Mock Generator, Workflow Validator, Integration Tester, Error Path Tester
+  - Service auto-detection from .env and imports
+  - Orchestration with progress indicators
+  - Report synthesis to .agents/validation/
+  - Optional Archon integration with graceful fallback
+- Ready for Phase 4: Test validation system on real agent projects
 
 **Last Updated:** 2026-02-03
 
@@ -310,7 +319,7 @@ Specialist Subagents (spawned as needed):
 
 ## Phase 1: Framework Foundation
 
-**Status:** ⚪ Not Started
+**Status:** 🟢 Complete
 
 **User Stories Addressed:** US-007, US-008
 
@@ -350,56 +359,58 @@ Updates to existing PIV loop commands (create-prd, plan-feature, create_global_r
 
 ---
 
-## Phase 2: Review-Plan Command
+## Phase 2: Enhanced Plan-Feature
 
-**Status:** ⚪ Not Started
+**Status:** 🟢 Complete
 
 **User Stories Addressed:** US-001
 
 **What This Phase Delivers:**
-A new `/review-plan` command that analyzes implementation plans before execution. This catches issues early - missing context, invalid assumptions, non-existent file references - before time is wasted implementing a flawed plan. Simpler than full validation, serves as foundation for subagent patterns.
+An enhanced `/plan-feature` command with a built-in scoping and recommendations phase. Before generating the plan, it analyzes the PRD phase and user stories, identifies all decision points, and outputs recommendations with justifications to the terminal. User validates the approach conversationally, then the plan is generated with decisions baked in. This catches issues BEFORE planning, not after.
 
 **Prerequisites:**
-- Phase 1 complete (plans have validation strategy section)
-- Understanding of common plan failure patterns
+- Phase 1 complete (PRD and plans have validation sections)
+- Understanding of PRD phase structure and user story format
 
 **Scope - Included:**
-- ✅ New /review-plan command
-- ✅ Plan structure validation (all required sections present)
-- ✅ File reference validation (do referenced files exist?)
-- ✅ Pattern reference validation (do referenced patterns exist?)
-- ✅ Assumption detection and flagging
-- ✅ Issue report with recommended fixes
-- ✅ Confidence score for plan quality
+- ✅ Phase 0 added to plan-feature: Scope Analysis & Recommendations
+- ✅ Deep PRD phase analysis (extract scope, user stories, prerequisites)
+- ✅ Decision point identification from "Discussion Points" sections
+- ✅ Justified recommendations for each decision (with reasoning)
+- ✅ Terminal output of recommendations before plan generation
+- ✅ Conversational validation (user confirms or adjusts)
+- ✅ Plan generated with validated decisions (no ambiguity)
+- ✅ Prerequisite validation (prior phases complete, files exist)
 
 **Scope - NOT Included:**
-- ❌ Actual code execution/testing
-- ❌ Service integration testing
-- ❌ Mock generation
-- ❌ Full subagent coordination (single agent sufficient)
+- ❌ Separate /review-plan command (eliminated - scoping built into plan-feature)
+- ❌ Post-plan validation (plan is solid because approach was validated first)
+- ❌ New subagents (existing subagents sufficient for scoping)
 
 **Key Technical Decisions:**
-- Single agent sufficient for plan review (no subagents needed yet)
-- Output to terminal with option to save report
-- Should block execution if critical issues found (with override)
+- Scoping is Phase 0 of plan-feature, not a separate command
+- Recommendations output to terminal, plan output to file
+- Existing subagents (Pattern Recognition, Codebase Analysis) inform recommendations
+- No terminal Q&A loop for decisions - recommendations are justified and logical
 
-**Discussion Points for Clarification:**
-- Should this be required before /execute, or optional?
-- What severity levels for issues (critical/warning/info)?
-- Should it automatically fix simple issues or just report?
+**Plan Output Format:**
+- Dual-purpose: human readable AND AI executable
+- Each task includes "What this achieves" (human) and code snippets (AI)
+- Decisions documented in plan so executor understands constraints
+- Natural language explanations with relevant code examples
 
 **Done When:**
-- /review-plan command exists and is documented
-- Can identify missing context in plans
-- Validates file/pattern references exist
-- Outputs actionable fix recommendations
-- Provides confidence score
+- plan-feature outputs scope analysis before generating plan
+- All PRD "Discussion Points" resolved with justified recommendations
+- User can validate approach conversationally in terminal
+- Plan is generated only after approach is validated
+- Plans are cleaner (no ambiguous decisions for executor to resolve)
 
 ---
 
 ## Phase 3: Intelligent Validation Command
 
-**Status:** ⚪ Not Started
+**Status:** 🟢 Complete
 
 **User Stories Addressed:** US-002, US-003, US-004, US-005, US-006, US-009
 
@@ -408,7 +419,7 @@ The core `/validate-implementation` command with full subagent coordination. Thi
 
 **Prerequisites:**
 - Phase 1 complete (PRD and plans have validation sections)
-- Phase 2 complete (review-plan patterns established)
+- Phase 2 complete (enhanced plan-feature with scoping)
 - Test agent project available (lead-agent or x-agent-v2)
 
 **Scope - Included:**
@@ -501,16 +512,20 @@ Testing the complete validation system on real agent projects (lead-agent, x-age
 ## 10. Success Criteria
 
 **MVP is successful when:**
-1. Developer can run /review-plan and get actionable feedback before implementation
-2. Developer can run /validate-implementation and get comprehensive test results
-3. Validation catches issues that basic pytest would miss
-4. Real agent projects (lead-agent, x-agent-v2) can be validated
-5. Fix suggestions are accurate and actionable
+1. Developer runs /plan-feature and sees scope analysis with justified recommendations before plan generation
+2. Developer validates approach conversationally, plan is generated with decisions baked in
+3. Developer can run /validate-implementation and get comprehensive test results
+4. Validation catches issues that basic pytest would miss
+5. Real agent projects (lead-agent, x-agent-v2) can be validated
+6. Fix suggestions are accurate and actionable
 
 **Validation Commands:**
 ```bash
-# Review a plan
-/review-plan .agents/plans/feature-name.md
+# Plan a feature (includes scoping phase)
+/plan-feature Phase 2 - Enhanced Plan-Feature
+# → Outputs recommendations to terminal
+# → User validates: "looks good" or discusses changes
+# → Plan generated to .agents/plans/
 
 # Validate implementation
 /validate-implementation .agents/plans/feature-name.md
@@ -529,7 +544,8 @@ cat .agents/validation/latest-report.md
 | Real service testing costs money | Medium | Use mock-first approach, real services only for final validation |
 | Validation takes too long | Medium | Progress indicators, option to skip certain validators |
 | Edge cases in mock generation | Medium | Start simple, iterate based on real failures |
-| Subagent coordination complexity | High | Build Phase 2 (simpler) first, learn patterns before Phase 3 |
+| Subagent coordination complexity | High | Enhanced plan-feature (Phase 2) uses existing subagents, learn patterns before Phase 3 |
+| Scoping recommendations miss edge cases | Medium | Justify recommendations with PRD/user story references, user validates before plan generation |
 
 ---
 
@@ -538,6 +554,7 @@ cat .agents/validation/latest-report.md
 | Date | Version | Changes |
 |------|---------|---------|
 | 2026-02-03 | 1.0 | Initial PRD |
+| 2026-02-03 | 1.1 | Replaced Phase 2 (review-plan command) with Enhanced Plan-Feature; scoping & recommendations built into plan-feature instead of separate command; updated US-001 |
 
 ---
 

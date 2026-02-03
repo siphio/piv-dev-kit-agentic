@@ -1,0 +1,49 @@
+# PIV Loop - Service Configuration Template
+#
+# This file tells the validation system about external services your agent uses.
+# Auto-detection handles most cases - use this for overrides or edge cases.
+#
+# Usage:
+#   1. Copy to .agents/services.yaml
+#   2. Fill in services your agent uses
+#   3. Validation will test connectivity and auth
+#
+# When to use this file:
+#   - Auto-detection misses a service
+#   - You need to exclude a service from testing (skip: true)
+#   - You have custom health check endpoints
+#   - Service uses non-standard auth patterns
+
+services:
+  # Example: OpenAI API
+  openai:
+    auth_env: OPENAI_API_KEY        # Required: env var containing credentials
+    health: /models                  # Optional: endpoint to test connectivity
+    # skip: false                    # Optional: exclude from validation
+
+  # Example: PostgreSQL Database
+  postgres:
+    auth_env: DATABASE_URL
+    # health: SELECT 1              # Optional: health check query
+
+  # Example: Custom API
+  # my-api:
+  #   auth_env: MY_API_KEY
+  #   base_url_env: MY_API_URL      # Optional: if URL is also in env
+  #   health: /health
+  #   skip: false
+
+# Schema Reference:
+#
+# services:
+#   <service-name>:                 # Identifier (lowercase, hyphens ok)
+#     auth_env: STRING              # REQUIRED: env var name for auth
+#     health: STRING                # OPTIONAL: endpoint or query for health check
+#     base_url_env: STRING          # OPTIONAL: env var for base URL
+#     skip: BOOLEAN                 # OPTIONAL: true to exclude from validation
+#
+# The validation system will:
+#   1. Check that auth_env exists and is non-empty
+#   2. If health specified, attempt to reach it
+#   3. Report any connectivity or auth issues
+#   4. Skip services marked with skip: true

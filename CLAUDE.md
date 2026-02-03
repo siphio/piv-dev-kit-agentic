@@ -161,3 +161,28 @@ When working on this project:
 8. Ensure phases remain self-contained
 9. Link user stories to phases bidirectionally
 10. When in doubt, optimize for human scannability
+
+## 11. Plan-Feature Workflow
+
+When running `/plan-feature` on a project with a PRD:
+
+**Phase 0: Scope Analysis (Terminal Output)**
+1. Read the PRD phase being planned
+2. Extract user stories, prerequisites, scope boundaries
+3. Identify decision points from "Discussion Points" sections
+4. Output recommendations with justifications to terminal:
+   ```
+   ### Recommendations
+
+   1. **[Decision Point]**
+      → [Recommendation]
+      Why: [Justification - how this serves the goal]
+   ```
+5. Wait for user validation (confirm or discuss changes)
+
+**Plan Generation (File Output)**
+- Only proceed after user validates approach
+- Bake validated decisions into the plan
+- Document decisions in NOTES section so executor understands constraints
+
+**Key Principle:** Recommendations must include WHY - the justification based on PRD requirements, user stories, or codebase patterns. This enables informed validation.
