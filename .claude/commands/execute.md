@@ -70,6 +70,26 @@ Execute a development plan with intelligent task parallelization and integrated 
 - If teammate encounters issues with another's work, direct messaging required
 - Failures in one task block dependent tasks only
 
+**Terminal Visibility (REQUIRED):**
+Lead MUST output progress to terminal so the user can track execution:
+```
+🚀 Batch [N]: Spawning [N] teammates
+
+Teammate 1: [task ID] → [task description]
+Teammate 2: [task ID] → [task description]
+
+⏳ Batch [N] executing...
+
+✅ Teammate 1 complete: [files created/modified, brief result]
+❌ Teammate 2 failed: [error summary]
+
+📊 Batch [N] complete: [N]/[N] succeeded
+```
+- Announce each batch BEFORE spawning teammates
+- Report each teammate's result as they complete
+- Summarize batch results before starting the next batch
+- Never execute silently — the user must see what is happening
+
 ## Step 7: Implementation - Sequential Fallback Mode
 
 Execute tasks serially when Agent Teams unavailable:

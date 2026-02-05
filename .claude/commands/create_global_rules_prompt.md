@@ -78,6 +78,32 @@ Create a `CLAUDE.md` file (or similar global rules file) following this structur
       - Only show code when actively implementing (not when explaining)
       - Use status indicators for progress (⚪🟡🟢🔴 or similar)
 
+    **Task Progress Reporting (REQUIRED — applies to ALL execution, not just Agent Teams):**
+    - Before starting ANY task, output what is about to happen:
+      ```
+      🔄 Starting: [task description]
+         Files: [files that will be created/modified]
+         Depends on: [completed prerequisites, or "none"]
+      ```
+    - After completing any task, output the result:
+      ```
+      ✅ Complete: [task description]
+         Result: [brief summary — files created, tests passed, etc.]
+      ```
+    - If a task fails, output the failure clearly:
+      ```
+      ❌ Failed: [task description]
+         Error: [what went wrong]
+         Impact: [what is now blocked]
+      ```
+    - For multi-step work, output periodic progress so the user is never left wondering what is happening:
+      ```
+      📊 Progress: [N]/[Total] tasks complete | [N] in progress | [N] remaining
+      ```
+    - This applies to EVERY command that does implementation work — `/execute`, `/validate-implementation`, `/research-stack`, and any custom commands
+    - The user must ALWAYS be able to see what the agent is currently doing and how far along it is
+    - Never work silently — if more than 30 seconds passes without terminal output, something is wrong
+
 12. **Service Configuration** (for AI Agent Projects)
     - Include this section only if the project is an AI agent with external service integrations
     - Document which services the agent uses and how to configure them
@@ -141,6 +167,29 @@ Create a `CLAUDE.md` file (or similar global rules file) following this structur
     - Direct messaging for integration questions
     - Lead coordinates but delegates implementation
     - One team per session only (experimental limitation)
+
+    **Terminal Visibility (REQUIRED):**
+    The Lead MUST output progress updates to the terminal so the user can track what teammates are doing. Format:
+    ```
+    🚀 Agent Teams: Spawning [N] teammates for [phase/command]
+
+    Teammate 1: [Role] → [specific task description]
+    Teammate 2: [Role] → [specific task description]
+    Teammate 3: [Role] → [specific task description]
+
+    ⏳ Teammates working...
+
+    ✅ Teammate 1 complete: [brief result - e.g., "instantly-api-profile.md written (245 lines)"]
+    ✅ Teammate 2 complete: [brief result]
+    ❌ Teammate 3 failed: [brief error]
+
+    📊 Team Summary: [N]/[N] succeeded, [time elapsed]
+    ```
+    - Lead announces BEFORE spawning (what each teammate will do)
+    - Lead reports AFTER each teammate completes (what they produced or why they failed)
+    - Lead provides a final summary with pass/fail counts
+    - If a teammate is blocked or slow, Lead reports status updates
+    - Never run teammates silently — the user must always see what is happening
 
     **When to Use Agent Teams:**
     - `/execute` with 3+ independent tasks → parallel implementers
