@@ -30,6 +30,42 @@ Write the PRD to: `$ARGUMENTS` (default: `PRD.md`)
 **If exceeding 750 lines:** Trim generic sections, reduce examples, compress non-agent sections.
 **If under 500 lines:** Expand agent behavior scenarios, add more decision paths, detail error recovery.
 
+## Reasoning Approach
+
+**CoT Style:** Few-shot
+
+Before writing each PRD section, reason through:
+1. Extract agent identity, autonomy level, and personality from conversation
+2. Rationalize technology decisions — capture the *why* from discussion, not just the *what*
+3. Define agent behaviors with explicit decision trees covering happy paths AND failures
+4. Create 8-15 testable scenarios (Given/When/Then/Error/Edge) from conversation examples
+5. Link every user story to at least one scenario bidirectionally
+6. Phase the implementation so each phase is self-contained after `/clear` + `/prime`
+
+**Few-shot example for scenario quality:**
+
+Good scenario:
+```
+Given: User provides a company URL
+When: Agent researches the company
+Then: Agent returns 3-5 key facts
+Error: If URL unreachable, agent reports failure and suggests manual input
+Edge: URL redirects to a different domain
+```
+
+Bad scenario:
+```
+Given: Input
+When: Agent runs
+Then: Output
+```
+
+## Hook Toggle
+
+Check CLAUDE.md for `## PIV Configuration` → `hooks_enabled` setting.
+If arguments contain `--with-hooks`, enable hooks. If `--no-hooks`, disable.
+Strip hook flags from arguments before using remaining text as output filename.
+
 ---
 
 ## PRD Structure
@@ -365,6 +401,43 @@ After creating the PRD:
 3. List any assumptions made
 4. Suggest which phase to start with
 5. **Remind user**: Run `/research-stack` before `/plan-feature` to generate technology profiles
+
+### Reasoning
+
+Output 4-8 bullets summarizing your generation process:
+
+```
+### Reasoning
+- Extracted [N] technology decisions from conversation
+- Defined [N] scenarios ([N] happy, [N] error, [N] edge)
+- [N] user stories mapped to scenarios
+- Phased into [N] implementation phases
+- Key assumption: [if any]
+```
+
+### Reflection
+
+Self-critique the generated PRD (terminal only):
+- Does the Agent Behavior Specification fully reflect the conversation?
+- Are all technology decisions captured with rationale?
+- Are scenarios testable and specific (not generic)?
+- Do all phases reference scenarios and technologies?
+- Is the line count within 500-750?
+
+### PIV-Automator-Hooks (If Enabled)
+
+If hooks are enabled, append to the PRD file:
+
+```
+## PIV-Automator-Hooks
+prd_status: complete
+technologies_to_research: [comma-separated list]
+scenarios_count: [N]
+phases_count: [N]
+next_suggested_command: research-stack
+next_arg: "[PRD filename]"
+confidence: [high|medium|low]
+```
 
 ---
 

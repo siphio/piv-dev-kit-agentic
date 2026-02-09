@@ -20,6 +20,23 @@ Build comprehensive understanding of the codebase by analyzing structure, docume
 
 Check arguments for keywords: `ref`, `reference`, `--with-refs`, `include ref`
 
+## Reasoning Approach
+
+**CoT Style:** Zero-shot
+
+Before producing the output report, think step by step:
+1. Scan codebase structure — file count, directory patterns, languages
+2. Cross-reference `.agents/reference/` profiles with `.agents/plans/` progress
+3. Assess development progress — what's done, what's pending, any gaps
+4. Check artifact freshness — are plans/profiles outdated relative to recent commits?
+5. Determine the precise next step based on current PIV loop position
+
+## Hook Toggle
+
+Check CLAUDE.md for `## PIV Configuration` → `hooks_enabled` setting.
+If arguments contain `--with-hooks`, enable hooks. If `--no-hooks`, disable.
+Strip hook flags from arguments before processing reference file keywords.
+
 ## Process
 
 ### 1. Analyze Project Structure
@@ -140,5 +157,48 @@ Based on the project state, suggest the next PIV command:
 - Plan exists, not executed? → "Run `/execute .agents/plans/[plan].md`"
 - Executed, not validated? → "Run `/validate-implementation`"
 - Validated? → "Run `/commit` to ship"
+
+### Reasoning
+
+Output 4-8 bullets summarizing what you found during analysis. Place this BEFORE the Project Overview section in terminal output. Example:
+
+```
+### Reasoning
+- Scanned [N] tracked files, [N] directories
+- PRD found at [path], currently on Phase [N]
+- [N] technology profiles available, [N] plans created
+- Last commit [date]: [summary]
+- Gap: [observation, if any]
+```
+
+### Reflection
+
+After generating the full report, output a brief self-critique to terminal:
+- Is this summary complete and accurate?
+- Did I miss context from CLAUDE.md, PRD, or recent commits?
+- Is my recommended next step correct given the project state?
+
+Format:
+
+```
+### Reflection
+- ✅/⚠️ [Finding]
+- ✅/⚠️ [Finding]
+```
+
+### PIV-Automator-Hooks (If Enabled)
+
+If hooks are enabled, append to terminal output:
+
+```
+## PIV-Automator-Hooks
+current_phase: [define|research|planning|executing|validating|shipping]
+completed_phases: [comma-separated list]
+pending_items: [brief description]
+recommended_next_command: [command name without /]
+recommended_arg: "[argument string]"
+requires_clear_before_next: [true|false]
+confidence: [high|medium|low]
+```
 
 **Make this summary easy to scan - use bullet points and clear headers.**

@@ -10,6 +10,26 @@ This orchestrator coordinates 7 specialist agents to analyze and plan the restru
 
 **Before running sub-agents, the orchestrator first primes itself with project understanding.**
 
+## Reasoning Approach
+
+**CoT Style:** Tree-of-Thought for phase coordination
+
+Before each phase:
+1. Assess what data is available from prior phases
+2. Determine if Agent Teams can parallelize this phase
+3. Identify potential cross-cutting issues between agents
+4. Decide execution strategy (parallel vs sequential)
+
+After each phase, reflect:
+- Did all agents in this phase complete successfully?
+- Are outputs consistent with each other?
+- Is the data sufficient for the next phase?
+
+## Hook Toggle
+
+Check CLAUDE.md for `## PIV Configuration` → `hooks_enabled` setting.
+If arguments contain `--with-hooks`, enable hooks. If `--no-hooks`, disable.
+
 ## Phase 0: Prime Context (Run First)
 
 Before any sub-agents run, build comprehensive project understanding:
@@ -242,6 +262,40 @@ The orchestration is complete when:
 - [ ] `script-audit.json` exists
 - [ ] `final-migration-plan.json` exists
 - [ ] `MIGRATION_PLAN.md` exists
+
+### Reasoning
+
+Output 4-8 bullets summarizing orchestration:
+
+```
+### Reasoning
+- Executed [N] phases with [N] total agents
+- Mode: [Agent Teams parallel | Sequential]
+- Phase results: [brief per-phase summary]
+- Key findings: [most important discoveries]
+```
+
+### Reflection
+
+Self-critique (terminal only):
+- Did all agents complete successfully?
+- Are the outputs consistent and non-contradictory?
+- Is the migration plan actionable and complete?
+
+### PIV-Automator-Hooks (If Enabled)
+
+If hooks are enabled, append to `MIGRATION_PLAN.md`:
+
+```
+## PIV-Automator-Hooks
+analysis_status: [complete|partial|failed]
+agents_completed: [N]/[Total]
+execution_mode: [parallel|sequential]
+critical_findings: [N]
+next_suggested_command: plan-feature
+next_arg: "[recommended first action]"
+confidence: [high|medium|low]
+```
 
 ## Begin Orchestration
 

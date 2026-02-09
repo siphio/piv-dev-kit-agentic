@@ -186,3 +186,92 @@ When running `/plan-feature` on a project with a PRD:
 - Document decisions in NOTES section so executor understands constraints
 
 **Key Principle:** Recommendations must include WHY - the justification based on PRD requirements, user stories, or codebase patterns. This enables informed validation.
+
+## 12. PIV Configuration
+
+Settings that control PIV command behavior across all commands.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| hooks_enabled | false | Append `## PIV-Automator-Hooks` to file artifacts |
+
+**Current Settings:**
+- hooks_enabled: false
+
+**Override per command:** Add `--with-hooks` or `--no-hooks` to any command invocation to override the project default for that run.
+
+**How commands check this:** Read this section from CLAUDE.md. If `hooks_enabled: true`, append hooks. If argument contains `--with-hooks`, enable regardless. If `--no-hooks`, disable regardless.
+
+## 13. Prompting & Reasoning Guidelines
+
+All PIV commands use structured reasoning internally. These are the shared patterns.
+
+### CoT Styles
+
+| Style | When Used | Commands |
+|-------|-----------|----------|
+| Zero-shot | Lightweight/focused tasks | /prime, /commit |
+| Few-shot | Complex generation with examples | /create-prd, /create_global_rules_prompt |
+| Tree-of-Thought | Decision exploration with multiple approaches | /plan-feature, /orchestrate-analysis |
+| Per-subtask | Parallel teammate tasks | /execute, /research-stack, /validate-implementation |
+
+### Terminal Reasoning Summary
+
+Every command outputs a brief `### Reasoning` section to terminal showing the key steps taken:
+
+```
+### Reasoning
+- Scanned 14 tracked files, identified 3 config patterns
+- Cross-referenced PRD Phase 2 with 2 technology profiles
+- Gap found: no rate limit handling for X API
+- Recommending: add retry logic before planning
+```
+
+Rules:
+- 4-8 bullet points maximum
+- Shows *what was found*, not the full thinking process
+- Appears before the main output section
+
+### Reflection Pattern
+
+After main generation, each command performs a brief self-critique:
+- Is output aligned with PRD/scenarios/profiles?
+- Is it complete — any missing sections or gaps?
+- Is it consistent with existing artifacts?
+
+Reflection output goes to **terminal only** — never into file artifacts. Format:
+
+```
+### Reflection
+- ✅ All PRD scenarios accounted for
+- ⚠️ Technology profile for Redis not found — flagged in recommendations
+- ✅ Line count within budget (623 lines)
+```
+
+### Hook Block Format
+
+When hooks are enabled, append to the **end** of file artifacts:
+
+```
+## PIV-Automator-Hooks
+key: value
+key: value
+```
+
+Rules:
+- 5-15 lines maximum
+- Simple key-value pairs (no nesting, no arrays)
+- Parseable with regex: `^([a-z_]+): (.+)$`
+- Each command defines its own keys (documented per command)
+- **Placement rule**: Hooks are appended to the primary file artifact when the command produces one (e.g. PRD.md, plan.md, profile.md). For commands that output only to terminal (e.g. /prime, /commit, /create_global_rules_prompt), the hooks block appears in terminal output.
+
+### Argument Parsing
+
+Commands that accept flags parse them from `$ARGUMENTS`:
+- Strip `--with-hooks` and `--no-hooks` from arguments before processing
+- Strip `--reflect` where applicable — currently supported only by `/plan-feature`; other commands ignore it
+- Remaining text is the actual argument (filename, phase name, etc.)
+
+### Manual Mode Preservation
+
+When hooks are disabled (the default), commands behave exactly as they did before this enhancement — no visible change in artifacts or terminal output except for the added Reasoning and Reflection sections in terminal.

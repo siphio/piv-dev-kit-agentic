@@ -50,6 +50,28 @@ All teammates work simultaneously, each producing their profile.
 **Without Agent Teams:**
 Research technologies sequentially, producing each profile before moving to the next.
 
+## Reasoning Approach
+
+**CoT Style:** Per-subtask (one per technology)
+
+For each technology being researched:
+1. Extract PRD context — why chosen, what agent needs, relevant scenarios
+2. Research official documentation — auth, endpoints, rate limits, SDKs
+3. Research community knowledge — gotchas, workarounds, real-world patterns
+4. Structure findings into profile format
+5. Classify all endpoints into testing tiers (1-4)
+
+After completing each profile, reflect:
+- Is the profile accurate and complete for this agent's needs?
+- Are there missing gotchas or undocumented limitations?
+- Does the testing tier classification cover all endpoints?
+
+## Hook Toggle
+
+Check CLAUDE.md for `## PIV Configuration` → `hooks_enabled` setting.
+If arguments contain `--with-hooks`, enable hooks. If `--no-hooks`, disable.
+Strip flags from arguments. Check for `--only [tech]` to research single technology.
+
 ---
 
 ## Research Process (Per Technology)
@@ -438,6 +460,23 @@ Each profile must:
 
 **Length guideline**: 150-400 lines per profile. Dense and actionable. The testing specification (Section 9) typically accounts for 30-40% of the profile.
 
+### PIV-Automator-Hooks Per Profile (If Enabled)
+
+If hooks are enabled, append to each profile file:
+
+```
+## PIV-Automator-Hooks
+tech_name: [technology name]
+research_status: complete
+endpoints_documented: [N]
+tier_1_count: [N]
+tier_2_count: [N]
+tier_3_count: [N]
+tier_4_count: [N]
+gotchas_count: [N]
+confidence: [high|medium|low]
+```
+
 ---
 
 ## Final Output
@@ -466,6 +505,26 @@ After generating all profiles:
 ### Next Step
 → Run `/plan-feature "Phase 1: [Name]"` to begin implementation planning
 ```
+
+### Reasoning
+
+Output 4-8 bullets summarizing all research:
+
+```
+### Reasoning
+- Researched [N] technologies from PRD Section 3
+- Generated [N] profiles totaling [N] endpoints documented
+- Key finding: [most important discovery]
+- Potential issue: [any technology limitation affecting PRD]
+```
+
+### Reflection
+
+Self-critique the research (terminal only):
+- Are all PRD technologies covered?
+- Are profiles accurate based on official docs + community sources?
+- Do testing tier classifications make sense for each endpoint?
+- Any profile gaps that could cause issues during planning?
 
 ---
 

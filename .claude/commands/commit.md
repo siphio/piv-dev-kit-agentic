@@ -15,6 +15,22 @@ First, check for and remove any stale git lock files:
 rm -f .git/index.lock
 ```
 
+## Reasoning Approach
+
+**CoT Style:** Zero-shot
+
+Before committing, think step by step:
+1. Review all staged changes — what files, what type of change
+2. Determine commit type (feat/fix/docs/refactor/etc.) from the changes
+3. Generate a descriptive message following project conventions
+4. Verify no sensitive files (.env, credentials) are staged
+
+## Hook Toggle
+
+Check CLAUDE.md for `## PIV Configuration` → `hooks_enabled` setting.
+If arguments contain `--with-hooks`, enable hooks. If `--no-hooks`, disable.
+Strip flags from arguments before using remaining text as custom commit message.
+
 ## Process
 
 ### 1. Check Current State
@@ -94,3 +110,35 @@ After completion, report:
 - Commit message summary
 - Remote push status
 - Link to view on GitHub (if available via `gh browse`)
+
+### Reasoning
+
+Output 3-5 bullets:
+
+```
+### Reasoning
+- Staged [N] files ([N] created, [N] modified)
+- Commit type: [type] based on [rationale]
+- Verified no sensitive files included
+```
+
+### Reflection
+
+Quick self-critique (terminal only):
+- Does the commit message accurately describe the changes?
+- Were all relevant files included?
+- Does it follow project conventions?
+
+### PIV-Automator-Hooks (If Enabled)
+
+If hooks are enabled, output to terminal after commit:
+
+```
+## PIV-Automator-Hooks
+commit_status: [success|failed]
+commit_hash: [short hash]
+files_committed: [N]
+next_suggested_command: prime
+next_arg: ""
+confidence: high
+```

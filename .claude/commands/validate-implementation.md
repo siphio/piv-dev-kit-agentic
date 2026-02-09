@@ -24,6 +24,29 @@ argument-hint: [plan-file-path] [--full]
 **Default runs Level 1 + Level 2 + Level 3** (syntax + components + scenarios)
 **With --full: adds Level 4** (full pipeline end-to-end)
 
+## Reasoning Approach
+
+**CoT Style:** Per-subtask (one per validation level/scenario category)
+
+For each validation level:
+1. Load the relevant source (plan commands, PRD scenarios, technology profiles)
+2. Determine what to test and expected outcomes
+3. Execute tests and capture results
+4. Compare actual vs expected outcomes
+5. Classify: PASS / FAIL / PARTIAL / SKIPPED
+
+For scenario validation specifically:
+1. Map scenario Given/When/Then to executable steps
+2. Determine integration tier (live vs fixture vs mock)
+3. Execute and verify each assertion
+4. Document deviations with specific details
+
+## Hook Toggle
+
+Check CLAUDE.md for `## PIV Configuration` → `hooks_enabled` setting.
+If arguments contain `--with-hooks`, enable hooks. If `--no-hooks`, disable.
+Strip `--with-hooks`, `--no-hooks`, and `--full` from arguments before using remaining text as plan path.
+
 ---
 
 ## Architecture
@@ -532,6 +555,46 @@ Location: `.agents/validation/{feature-name}-{YYYY-MM-DD}.md`
 
 ### Next Steps
 → Ready for `/commit` | Fix [N] issues first
+```
+
+### Reasoning
+
+Output 4-8 bullets summarizing validation:
+
+```
+### Reasoning
+- Tested [N] code validation commands (Level 1-2)
+- Validated [N] PRD scenarios ([N] happy, [N] error, [N] edge)
+- Verified [N] decision tree branches
+- Technology integration: [N] Tier 1, [N] Tier 2, [N] Tier 3, [N] Tier 4
+- Key finding: [most important result]
+```
+
+### Reflection
+
+Self-critique the validation (terminal only):
+- Did we achieve full scenario coverage from PRD Section 4.3?
+- Are any decision tree branches untested?
+- Were failure categories correctly identified?
+- Is the recommended next step accurate given results?
+
+### PIV-Automator-Hooks (If Enabled)
+
+If hooks are enabled, append to the validation report file:
+
+```
+## PIV-Automator-Hooks
+validation_status: [pass|partial|fail]
+scenarios_passed: [N]/[Total]
+scenarios_failed: [N]
+decision_branches_tested: [N]/[Total]
+failure_categories: [comma-separated: e.g. edge-cases,rate-limits]
+suggested_action: [commit|re-execute|fix-and-revalidate]
+suggested_command: [commit|execute|validate-implementation]
+suggested_arg: "[appropriate argument]"
+retry_remaining: [N]
+requires_clear: [true|false]
+confidence: [high|medium|low]
 ```
 
 ---

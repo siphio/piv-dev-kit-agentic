@@ -5,6 +5,24 @@
 
 ---
 
+## Reasoning Approach
+
+**CoT Style:** Few-shot
+
+Before generating CLAUDE.md:
+1. Determine project type — new or existing codebase
+2. If existing: analyze structure, config files, patterns, conventions
+3. If new: gather requirements via questions, research best practices
+4. Structure findings into the required sections
+5. Ensure all sections are specific to this project, not generic
+
+## Hook Toggle
+
+Check CLAUDE.md for `## PIV Configuration` → `hooks_enabled` setting (if CLAUDE.md already exists for update).
+If arguments contain `--with-hooks`, enable hooks. If `--no-hooks`, disable.
+
+---
+
 Help me create the global rules for my project. Analyze the project first to see if it is a brand new project or if it is an existing one, because if it's a brand new project, then we need to do research online to establish the tech stack and architecture and everything that goes into the global rules. If it's an existing code base, then we need to analyze the existing code base.
 
 ## Instructions for Creating Global Rules
@@ -201,6 +219,21 @@ Create a `CLAUDE.md` file (or similar global rules file) following this structur
     - Quick bug fixes
     - When token budget is a concern (each teammate = full Claude instance)
 
+15. **PIV Configuration** (for projects using PIV loop)
+    - Add the configuration block:
+      ```markdown
+      ## PIV Configuration
+      - hooks_enabled: false
+      ```
+    - Set to `true` if the project plans to use SDK automation or wants hook metadata
+
+16. **Prompting & Reasoning Guidelines** (for projects using PIV loop)
+    - Add the CoT styles table (zero-shot, few-shot, ToT, per-subtask)
+    - Add the Terminal Reasoning Summary format (4-8 bullets)
+    - Add the Reflection pattern description (terminal only, ✅/⚠️ format)
+    - Add the Hook Block Format specification (key-value, regex-parseable)
+    - Reference CLAUDE.md in piv-dev-kit for the canonical version of these guidelines
+
 ## Process to Follow:
 
 ### For Existing Projects:
@@ -241,3 +274,39 @@ Create the CLAUDE.md with:
 - Real examples from the codebase (existing projects) or based on best practices (new projects)
 
 Start by analyzing the project structure now. If this is a new project and you need more information, ask your clarifying questions first.
+
+### Reasoning
+
+Output 4-6 bullets:
+
+```
+### Reasoning
+- Project type: [new|existing] — [brief justification]
+- Analyzed [N] config files, [N] source files for patterns
+- Tech stack: [summary]
+- Included Agent Teams playbook: [yes|no]
+- Included PIV Configuration + Reasoning Guidelines: [yes|no]
+```
+
+### Reflection
+
+Self-critique (terminal only):
+- Is the CLAUDE.md tailored to this specific project?
+- Does it cover the PIV philosophy and prompting guidelines?
+- Are code examples drawn from the actual codebase (not generic)?
+- Is it within 100-500 lines?
+
+### PIV-Automator-Hooks (If Enabled)
+
+If hooks are enabled, output to terminal:
+
+```
+## PIV-Automator-Hooks
+rules_status: generated
+includes_teams_playbook: [true|false]
+includes_piv_config: [true|false]
+includes_reasoning_guidelines: [true|false]
+next_suggested_command: create-prd
+next_arg: ""
+confidence: [high|medium|low]
+```

@@ -34,6 +34,30 @@ Transform a feature request into a **comprehensive implementation plan** through
 1. **Scope Analysis** → Output recommendations with justifications to terminal → User validates
 2. **Plan Generation** → Create implementation plan with validated decisions baked in
 
+## Reasoning Approach
+
+**CoT Style:** Tree-of-Thought (ToT) for decisions, zero-shot for analysis
+
+During Phase 0 (Scope Analysis), explore 2-3 approaches for each decision point:
+1. For each decision, generate 2-3 viable approaches
+2. Evaluate each against PRD requirements, technology profiles, and codebase patterns
+3. Select the approach with strongest justification
+4. Present selection with rationale to user
+
+During Phase 5 (Strategic Thinking), reason step by step:
+1. How does this feature fit the existing architecture?
+2. What are the critical dependencies and order of operations?
+3. What could go wrong? (Edge cases, race conditions, errors)
+4. Which technology profile constraints shape the implementation?
+5. How do PRD decision trees map to concrete code?
+
+## Hook Toggle
+
+Check CLAUDE.md for `## PIV Configuration` → `hooks_enabled` setting.
+If arguments contain `--with-hooks`, enable hooks. If `--no-hooks`, disable.
+If arguments contain `--reflect`, perform an extended reflection pass before finalizing.
+Strip all flags from arguments before using remaining text as the feature description.
+
 ## Planning Process
 
 > **Note:** If a PRD exists, start with Phase 0 (Scope Analysis) and output recommendations to terminal. Proceed to Phase 1 only after user validates the approach.
@@ -609,6 +633,20 @@ npm run format:check
 ## NOTES
 
 <Additional context, design decisions, trade-offs, decisions from Phase 0 scope analysis>
+
+## PIV-Automator-Hooks
+
+> **Only include this section when hooks are enabled (CLAUDE.md `hooks_enabled: true` or `--with-hooks` flag).**
+
+plan_status: ready_for_execution
+phase_source: [Phase N from PRD]
+independent_tasks_count: [N]
+dependent_chains: [N]
+technologies_consumed: [comma-separated profile names]
+next_suggested_command: execute
+next_arg: ".agents/plans/[this-file].md"
+estimated_complexity: [low|medium|high]
+confidence: [N]/10
 ```
 
 ## Output Format
@@ -722,3 +760,25 @@ After creating the Plan, provide:
 - **Agent Behavior**: [Yes/No - does this implement agent decision trees?]
 - **Confidence**: X/10 for one-pass success
 - **Next Step**: → Run `/execute .agents/plans/{plan-file}.md` to begin implementation
+
+### Reasoning
+
+Output 4-8 bullets summarizing the planning process:
+
+```
+### Reasoning
+- Analyzed PRD Phase [N] with [N] user stories
+- Consumed [N] technology profiles
+- Explored [N] approaches for [key decision], selected [choice]
+- Identified [N] independent tasks, [N] sequential chains
+- Mapped [N] PRD scenarios to validation strategy
+```
+
+### Reflection
+
+Self-critique the generated plan (terminal only):
+- Does the plan enable one-pass implementation success?
+- Are technology profile constraints reflected in task descriptions?
+- Do validation commands cover all relevant PRD scenarios?
+- Is every decision from Phase 0 baked into the plan?
+- Is line count within 500-750?

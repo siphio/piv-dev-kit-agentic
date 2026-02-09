@@ -7,6 +7,28 @@ argument-hint: [plan-file-path]
 
 Execute a development plan with intelligent task parallelization and integrated validation. Uses Agent Teams for parallel execution when available, with sequential fallback mode.
 
+## Reasoning Approach
+
+**CoT Style:** Per-subtask
+
+For each task or batch:
+1. Load plan context and relevant technology profiles
+2. Resolve dependencies — confirm prerequisites are complete
+3. Analyze the task — what files to create/modify, what patterns to follow
+4. Implement following plan specifications and profile constraints
+5. Validate locally — run task-level validation command
+
+After each batch, perform brief reflection:
+- Did all tasks in the batch integrate correctly?
+- Any conflicts between parallel task outputs?
+- Are dependent tasks now unblocked?
+
+## Hook Toggle
+
+Check CLAUDE.md for `## PIV Configuration` → `hooks_enabled` setting.
+If arguments contain `--with-hooks`, enable hooks. If `--no-hooks`, disable.
+Strip flags from arguments before using remaining text as plan file path.
+
 ## Step 1: Read and Parse Plan
 
 - Read plan file from `$ARGUMENTS[0]`
@@ -163,6 +185,43 @@ Next Steps:
 → Run `/validate-implementation {plan-file}` to validate against PRD scenarios
 - {remediation for any failures before validation}
 - {documentation updates if needed}
+```
+
+### Reasoning
+
+Output 4-8 bullets summarizing execution:
+
+```
+### Reasoning
+- Executed [N] tasks in [N] batches ([Agent Teams|Sequential])
+- [N] technology profiles consumed across tasks
+- [N] file conflicts resolved, [N] integration issues addressed
+- Critical path: [task IDs]
+- Key challenge: [if any]
+```
+
+### Reflection
+
+Self-critique the execution (terminal only):
+- Did all tasks complete within plan specifications?
+- Are there integration gaps between batch outputs?
+- Is the codebase in a consistent state for validation?
+
+### PIV-Automator-Hooks (If Enabled)
+
+If hooks are enabled, append to the progress file (`.agents/progress/{plan-name}-progress.md`):
+
+```
+## PIV-Automator-Hooks
+execution_status: [success|partial|failed]
+tasks_completed: [N]/[Total]
+tasks_blocked: [N]
+files_created: [N]
+files_modified: [N]
+next_suggested_command: validate-implementation
+next_arg: "[plan-path] --full"
+requires_clear: [true|false]
+confidence: [high|medium|low]
 ```
 
 ## Rules and Error Handling
