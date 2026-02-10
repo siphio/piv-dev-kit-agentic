@@ -23,11 +23,34 @@ After each batch, perform brief reflection:
 - Any conflicts between parallel task outputs?
 - Are dependent tasks now unblocked?
 
-## Hook Toggle
+## Hooks
 
-Check CLAUDE.md for `## PIV Configuration` → `hooks_enabled` setting.
-If arguments contain `--with-hooks`, enable hooks. If `--no-hooks`, disable.
-Strip flags from arguments before using remaining text as plan file path.
+Hooks are always enabled. `## PIV-Automator-Hooks` is appended to the progress file (`.agents/progress/{plan-name}-progress.md`).
+
+## Step 0: Create Checkpoint
+
+- Read `checkpoint_before_execute` from CLAUDE.md PIV Configuration
+- If enabled:
+  1. Check manifest for existing checkpoint with `status: active` for this phase (retry scenario)
+  2. If active checkpoint exists: **reuse it** — do not create a new tag
+  3. If no active checkpoint: create git tag `piv-checkpoint/{phase}-{ISO-8601-timestamp}`
+     ```bash
+     git tag piv-checkpoint/{phase}-{timestamp}
+     ```
+  4. Record in manifest `checkpoints` section:
+     ```yaml
+     checkpoints:
+       - tag: piv-checkpoint/{phase}-{timestamp}
+         phase: [N]
+         created_before: execute
+         status: active
+     ```
+  5. Output to terminal:
+     ```
+     🔖 Checkpoint created: piv-checkpoint/{phase}-{timestamp}
+        Rollback available via: git reset --hard {tag} && git clean -fd
+     ```
+- If disabled: skip checkpoint creation, output note to terminal
 
 ## Step 1: Read and Parse Plan
 
@@ -61,7 +84,13 @@ Strip flags from arguments before using remaining text as plan file path.
 - Analyze technology profile requirements and check for available tools/libraries
 - Document analysis findings for team context
 
-## Step 6: Implementation - Agent Teams Mode (When Available)
+## Step 6: Implementation - Agent Teams Mode (Preferred)
+
+**Resume Support (Retry Scenario):**
+Before executing any task, check `.agents/progress/` for existing status:
+- If task status is "done" → **skip** (already completed in previous attempt)
+- If task status is "blocked" from previous failure → **reset to "todo"** and attempt
+- Output skipped tasks: `⏭️ Skipping task [ID] — already complete from previous run`
 
 **Team Lead Coordinates Execution:**
 1. Analyze dependency graph from Step 4
@@ -116,6 +145,12 @@ Teammate 2: [task ID] → [task description]
 
 Execute tasks serially when Agent Teams unavailable:
 
+**Resume Support (Retry Scenario):**
+Before executing any task, check `.agents/progress/` for existing status:
+- If task status is "done" → **skip** (already completed in previous attempt)
+- If task status is "blocked" from previous failure → **reset to "todo"** and attempt
+- Output skipped tasks: `⏭️ Skipping task [ID] — already complete from previous run`
+
 1. Sort tasks by dependency order
 2. For each task in order:
    - Update progress file: task status → "doing"
@@ -124,7 +159,38 @@ Execute tasks serially when Agent Teams unavailable:
    - Push changes to repository
    - Update progress file: task status → "review"
 3. Maximum one task in "doing" state at any time
-4. Stop on critical failures; mark remaining tasks as "blocked"
+4. **On task failure:**
+   - Classify the error using the taxonomy from CLAUDE.md (syntax_error, test_failure, etc.)
+   - Look up `max_retries` for that error category
+   - Check manifest for existing failure entry for this phase/command
+   - Write/update failure entry in manifest `failures` section:
+     ```yaml
+     failures:
+       - command: execute
+         phase: [N]
+         error_category: [taxonomy category]
+         timestamp: [ISO 8601]
+         retry_count: [N]
+         max_retries: [N from taxonomy]
+         checkpoint: [tag name or "none"]
+         resolution: pending
+         details: "[human-readable error description]"
+     ```
+   - Output `## PIV-Error` block to terminal (always-on, not gated by hooks)
+   - If `partial_execution` (multiple tasks blocked):
+     a. Check manifest for existing `partial_execution` failure for this phase
+     b. If this is the FIRST `partial_execution` for this phase (retry_count: 0):
+        - Auto-rollback to checkpoint: `git reset --hard {tag} && git clean -fd`
+        - Update manifest failure entry: `retry_count: 1`, `resolution: auto_rollback_retry`
+        - Write notification to manifest (type: info, severity: warning, blocking: false, details: "Auto-rolled back Phase [N], retrying execution")
+        - The orchestrator will re-run `/execute` on next cycle (via `/prime` recommendation)
+     c. If this is the SECOND `partial_execution` (retry_count: 1, max reached):
+        - Keep checkpoint active, do NOT rollback
+        - Update manifest failure entry: `resolution: escalated_blocking`
+        - Write notification to manifest (type: escalation, severity: critical, blocking: true, details: "Phase [N] execution failed twice — requires human intervention")
+        - Output `## PIV-Error` block
+     d. Mark remaining tasks as "blocked"
+5. Stop on critical failures; mark remaining tasks as "blocked"
 
 ## Step 8: Validation Phase
 
@@ -147,6 +213,10 @@ Execute tasks serially when Agent Teams unavailable:
 - Leave unvalidated tasks in "review" for manual verification
 - Record completion timestamps and validation results
 - Record any remediation actions needed
+- **Checkpoint-aware finalization:**
+  - On full success: leave checkpoint as `active` (resolved by `/commit` after validation)
+  - On failure: ensure checkpoint remains `active` for potential rollback
+  - On successful retry (previous failure now resolved): update failure entry `resolution: auto_fixed`
 - **Update manifest**: Read `.agents/manifest.yaml` (create if needed). Add execution entry and update phase status:
   ```yaml
   executions:
@@ -220,9 +290,9 @@ Self-critique the execution (terminal only):
 - Are there integration gaps between batch outputs?
 - Is the codebase in a consistent state for validation?
 
-### PIV-Automator-Hooks (If Enabled)
+### PIV-Automator-Hooks
 
-If hooks are enabled, append to the progress file (`.agents/progress/{plan-name}-progress.md`):
+Append to the progress file (`.agents/progress/{plan-name}-progress.md`):
 
 ```
 ## PIV-Automator-Hooks

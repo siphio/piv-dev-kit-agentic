@@ -16,10 +16,9 @@ Before generating CLAUDE.md:
 4. Structure findings into the required sections
 5. Ensure all sections are specific to this project, not generic
 
-## Hook Toggle
+## Hooks
 
-Check CLAUDE.md for `## PIV Configuration` → `hooks_enabled` setting (if CLAUDE.md already exists for update).
-If arguments contain `--with-hooks`, enable hooks. If `--no-hooks`, disable.
+Hooks are always enabled. `## PIV-Automator-Hooks` is appended to terminal output (this command does not produce a file artifact — it creates/updates CLAUDE.md, but hooks go to terminal).
 
 ---
 
@@ -223,12 +222,22 @@ Create a `CLAUDE.md` file (or similar global rules file) following this structur
     - Add the configuration block:
       ```markdown
       ## PIV Configuration
-      - hooks_enabled: false
       - profile_freshness_window: 7d
+      - checkpoint_before_execute: true
+      - mode: autonomous
+      - reasoning_model: opus-4-6
+      - validation_mode: full
+      - agent_teams: prefer_parallel
       ```
-    - Set hooks to `true` if the project plans to use SDK automation or wants hook metadata
+    - Hooks are always enabled — all commands append `## PIV-Automator-Hooks` to their primary file artifact
+    - `mode: autonomous` means no human checkpoints during execution — agent self-validates all decisions
+    - `reasoning_model` specifies the model for all autonomous reasoning and self-validation
+    - `validation_mode: full` means always run full live validation including Tier 3 API calls
+    - `agent_teams: prefer_parallel` means use Agent Teams for parallel execution whenever available
     - `profile_freshness_window` controls when `/prime` flags profiles as stale (default 7 days)
+    - `checkpoint_before_execute` creates a git tag before `/execute` runs — enables safe rollback on failure
     - Add a manifest paragraph: "The framework tracks project state in `.agents/manifest.yaml`. All PIV commands read and write to this file — phase progress, profile freshness, coverage gaps, and next-action recommendations. `/prime` builds and reconciles the manifest; other commands update it after producing artifacts."
+    - Add context window pairings: Document which commands share a session before clearing. This enables the orchestrator to manage Claude Code sessions correctly.
 
 16. **Prompting & Reasoning Guidelines** (for projects using PIV loop)
     - Add the CoT styles table (zero-shot, few-shot, ToT, per-subtask)
@@ -251,18 +260,25 @@ Create a `CLAUDE.md` file (or similar global rules file) following this structur
       - **Profile freshness**: generation date and stale/fresh status per technology profile
       - **Plans and executions**: paths, phases, completion status
       - **Validation results**: scenarios passed/failed/skipped per validation run
+      - **Checkpoints**: git tags created before `/execute`, with active/resolved status
+      - **Failures**: structured error history with category, retry count, and resolution status
       - **Next action**: recommended command, argument, reason, and confidence
       - **Coverage gaps**: missing or stale profiles for the next unfinished phase
+      - **Notifications**: structured events for the orchestrator to forward to Telegram (escalations, completions)
+      - **Pre-flight**: credential verification status and timestamp
 
       **Which commands write what:**
       | Command | Manifest Section Updated |
       |---------|--------------------------|
-      | `/prime` | Builds/reconciles full manifest, writes `next_action` |
+      | `/prime` | Builds/reconciles full manifest, writes `next_action`, reads `failures`/`checkpoints` |
       | `/create-prd` | Writes `prd` entry, initializes `phases` |
       | `/research-stack` | Writes `profiles` entries |
       | `/plan-feature` | Appends to `plans`, updates `phases.[N].plan` |
-      | `/execute` | Appends to `executions`, updates `phases.[N].execution` |
+      | `/execute` | Writes `checkpoints`, appends to `executions`, updates `phases.[N].execution` |
       | `/validate-implementation` | Appends to `validations`, updates `phases.[N].validation` |
+      | `/commit` | Resolves `checkpoints` (active → resolved), clears pending `failures`, writes `notifications` (phase_complete) |
+      | `/preflight` | Writes `preflight` entry, writes `notifications` for missing credentials |
+      | All failing commands | Write to `failures` section with error category and retry state |
 
       **Conventions:**
       - Always read manifest before writing — merge, never overwrite
@@ -273,6 +289,101 @@ Create a `CLAUDE.md` file (or similar global rules file) following this structur
       **Refresh workflow:**
       When `/prime` flags stale profiles → run `/research-stack --refresh` → profiles updated with fresh timestamps → `/prime` reports clean status on next run.
       ```
+
+18. **Failure Intelligence Reference** (for projects using PIV loop)
+    - Document the error taxonomy, checkpointing, and structured error handling:
+      ```markdown
+      ## Failure Intelligence
+
+      The PIV framework classifies every command failure and persists recovery state in the manifest.
+
+      ### Error Taxonomy
+
+      | Category | Where It Happens | Recovery Action | Max Retries | Human Needed? |
+      |----------|-----------------|-----------------|-------------|---------------|
+      | `syntax_error` | `/execute`, `/validate` L1 | Auto-fix and retry | 2 | No (unless retries exhausted) |
+      | `test_failure` | `/execute` validation, `/validate` L2 | Auto-fix and retry | 2 | No (unless retries exhausted) |
+      | `scenario_mismatch` | `/validate` Phase 3 | Re-read PRD, adjust implementation | 1 | Maybe (after retry) |
+      | `integration_auth` | `/validate` Tier 1, `/research-stack` | Escalate immediately | 0 | Yes |
+      | `integration_rate_limit` | `/validate` Tier 2-3 | Wait with backoff, retry | 3 | No |
+      | `stale_artifact` | `/prime` reconciliation | Auto-refresh via `/research-stack --refresh` | 1 | No |
+      | `prd_gap` | `/plan-feature` Phase 0 | Make best-effort assumption, document reasoning, continue | 0 | No — agent resolves with documented assumption |
+      | `partial_execution` | `/execute` | Auto-rollback to checkpoint, retry once | 1 | Yes — only after auto-retry fails |
+      | `line_budget_exceeded` | `/create-prd`, `/plan-feature` | Auto-trim and retry | 1 | No |
+
+      ### Git Checkpointing
+
+      A lightweight git tag is created automatically before `/execute` runs (when `checkpoint_before_execute: true`).
+
+      **Tag format**: `piv-checkpoint/{phase}-{ISO-8601-timestamp}`
+      **Lifecycle**: `active` (created) → `resolved` (after `/commit` succeeds)
+      **Rollback**: `git reset --hard {tag} && git clean -fd`
+
+      Only `/execute` creates checkpoints — it's the only command that modifies source code.
+
+      ### PIV-Error Block
+
+      Always-on (not gated by hooks). Output to terminal on any command failure:
+      ```
+      ## PIV-Error
+      error_category: [taxonomy category]
+      command: [command that failed]
+      phase: [phase number if applicable]
+      details: "[human-readable error description]"
+      retry_eligible: [true|false]
+      retries_remaining: [N]
+      checkpoint: [tag name or "none"]
+      ```
+      Same data is written to manifest `failures` section. Regex-parseable: `^([a-z_]+): (.+)$`
+
+      ### Retry vs Rollback
+
+      **Retry** = resume from failure point. Previous tasks are fine — fix the error and continue. Progress file tracks what's done.
+      **Rollback** = retries exhausted or `partial_execution`. Reset to checkpoint, wipe all execution changes. Manifest retains full failure history.
+
+      ### How `/prime` Uses Failure State
+
+      On every run, `/prime` reads `checkpoints` and `failures` from manifest:
+      - Pending failure + retries remaining → recommend retry with fix guidance
+      - Pending failure + no retries → recommend rollback + escalate
+      - Active checkpoint + no failure → execution interrupted, recommend resume
+      - Resolved checkpoint → historical, no action needed
+      ```
+
+19. **Pre-Flight & Credential Management** (for projects using PIV loop)
+    - Document the `/preflight` command and its role in the autonomous workflow
+    - Explain that all credentials are verified BEFORE autonomous execution begins
+    - Document the notification mechanism for mid-execution credential failures
+    - Include the pre-flight manifest entry format:
+      ```yaml
+      preflight:
+        status: passed | blocked
+        completed_at: [ISO 8601]
+        credentials_verified: [N]
+        technologies_checked: [list]
+      ```
+    - Only `integration_auth` errors are always blocking — the agent cannot fix credentials
+
+20. **Orchestrator Interface** (for projects using PIV loop with autonomous orchestration)
+    - Document the command execution sequence the orchestrator follows
+    - Document context window pairings (which commands share a session)
+    - Document the manifest as the sole decision interface:
+      - `next_action` → what to run next
+      - `failures` → error state and retry eligibility
+      - `notifications` → events to forward to Telegram
+      - `preflight` → whether credentials are verified
+    - Document the orchestrator's core loop:
+      1. Read manifest `next_action`
+      2. Start Claude Code session (CLAUDE.md loads automatically)
+      3. Run `/prime` + recommended command
+      4. Session ends, read manifest
+      5. If `notifications` has `blocking: true` → pause, notify human, wait
+      6. If all phases complete → notify human, stop
+      7. Otherwise → repeat from step 1
+    - Document the notification lifecycle:
+      - Framework appends notifications — never deletes or acknowledges
+      - Orchestrator reads after each session, forwards to Telegram, sets `acknowledged: true`
+      - `/prime` only reports unacknowledged notifications
 
 ## Process to Follow:
 
@@ -336,9 +447,9 @@ Self-critique (terminal only):
 - Are code examples drawn from the actual codebase (not generic)?
 - Is it within 100-500 lines?
 
-### PIV-Automator-Hooks (If Enabled)
+### PIV-Automator-Hooks
 
-If hooks are enabled, output to terminal:
+Output to terminal:
 
 ```
 ## PIV-Automator-Hooks

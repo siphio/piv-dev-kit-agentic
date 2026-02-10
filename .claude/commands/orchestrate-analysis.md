@@ -25,10 +25,9 @@ After each phase, reflect:
 - Are outputs consistent with each other?
 - Is the data sufficient for the next phase?
 
-## Hook Toggle
+## Hooks
 
-Check CLAUDE.md for `## PIV Configuration` → `hooks_enabled` setting.
-If arguments contain `--with-hooks`, enable hooks. If `--no-hooks`, disable.
+Hooks are always enabled. `## PIV-Automator-Hooks` is appended to `MIGRATION_PLAN.md`.
 
 ## Phase 0: Prime Context (Run First)
 
@@ -282,9 +281,9 @@ Self-critique (terminal only):
 - Are the outputs consistent and non-contradictory?
 - Is the migration plan actionable and complete?
 
-### PIV-Automator-Hooks (If Enabled)
+### PIV-Automator-Hooks
 
-If hooks are enabled, append to `MIGRATION_PLAN.md`:
+Append to `MIGRATION_PLAN.md`:
 
 ```
 ## PIV-Automator-Hooks

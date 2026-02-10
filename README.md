@@ -1,8 +1,10 @@
-# PIV Dev Kit
+# PIV Dev Kit (Agentic)
 
-**AI-Powered Agent Development Framework**
+**AI-Powered Agent Development Framework — with State Awareness**
 
 A systematic approach to building AI agents with Claude Code. The PIV (Prime-Implement-Validate) loop ensures every feature is properly planned, implemented, and verified before moving forward. Designed for Opus 4.6 and Agent Teams.
+
+> **Agentic branch**: This variant adds persistent state tracking via `.agents/manifest.yaml` — deterministic phase progress, profile freshness detection, coverage gap analysis, and next-action recommendations. It also includes failure intelligence — structured error taxonomy, git checkpointing before execution, retry budgets, and manifest-persisted failure history that survives `/clear` + `/prime` cycles. Together, these form the foundation for the autonomous orchestrator wrapper.
 
 ---
 
@@ -21,6 +23,8 @@ This framework solves the #1 problem with AI-assisted development: **context los
 - **Structured reasoning** - Every command uses Chain-of-Thought internally, with visible reasoning summaries and self-reflection
 - **Agent Teams ready** - Commands parallelize automatically when Agent Teams is available
 - **Automation-ready** - Optional PIV-Automator-Hooks prepare artifacts for future SDK orchestration
+- **State-aware** - `.agents/manifest.yaml` tracks phase progress, profile freshness, and coverage gaps deterministically
+- **Failure-aware** - Structured error taxonomy with per-category recovery actions, git checkpointing, and retry budgets persisted in manifest
 
 ---
 
@@ -109,21 +113,28 @@ This generates a `CLAUDE.md` file with:
 ### Prime Phase
 
 #### `/prime`
-Builds comprehensive understanding of your codebase, discovers technology profiles, and reports development progress.
+Builds comprehensive understanding of your codebase, discovers technology profiles, and reports development progress. Loads, builds, and reconciles the project manifest for deterministic state tracking.
 
 ```bash
-/prime                    # Standard analysis
+/prime                    # Standard analysis (with manifest)
 /prime --with-refs        # Include reference documentation
+/prime --no-manifest      # Legacy mode — skip manifest operations
 ```
 
-**Output:** Project overview, architecture, tech stack, technology research status, recommended next step
+**Manifest operations (automatic):**
+1. **Load or build** — Reads `.agents/manifest.yaml` if it exists; on first run, scans filesystem for existing artifacts and builds the manifest from scratch
+2. **Reconcile** — Compares manifest entries against actual files on disk, flags mismatches, recalculates profile freshness against the 7-day window
+3. **Coverage gap detection** — Identifies the next unfinished phase, cross-references its technologies against existing profiles, flags missing or stale profiles
+4. **Failure assessment** — Reads `failures` and `checkpoints` sections; factors active failures, retry counts, and available rollback points into next-action recommendation
+
+**Output:** Project overview, architecture, tech stack, manifest status (freshness counts, coverage gaps, failure state, checkpoint status), failure-aware recommended next step
 
 ---
 
 ### Define Phase
 
 #### `/create-prd`
-Creates an agent-native Product Requirements Document from conversation context.
+Creates an agent-native Product Requirements Document from conversation context. Updates manifest with PRD entry and initializes all phase statuses.
 
 ```bash
 /create-prd              # Creates PRD.md
@@ -137,31 +148,43 @@ Creates an agent-native Product Requirements Document from conversation context.
 - User stories linked to scenarios
 - Implementation phases referencing technologies and scenarios
 
+**Manifest write:** Adds `prd` entry (path, status, generated_at, phases_defined) and initializes all `phases` as `not_started`.
+
 #### `/create_global_rules_prompt`
-Generates project-specific CLAUDE.md rules including Agent Teams playbook, PIV Configuration, and Prompting & Reasoning Guidelines.
+Generates project-specific CLAUDE.md rules including Agent Teams playbook, PIV Configuration (with `profile_freshness_window`), Prompting & Reasoning Guidelines, and a **Manifest Reference** section documenting what the manifest tracks and which commands write what.
 
 ---
 
 ### Research Phase
 
 #### `/research-stack`
-**NEW** - Deep-dives every technology in the PRD. Run once after PRD creation.
+Deep-dives every technology in the PRD. Run once after PRD creation. Supports `--refresh` for lightweight updates of stale profiles.
 
 ```bash
-/research-stack              # Research all technologies from PRD.md
-/research-stack PRD.md       # Specify PRD file
-/research-stack --only instantly  # Research single technology
+/research-stack                       # Research all technologies from PRD.md
+/research-stack PRD.md                # Specify PRD file
+/research-stack --only instantly       # Research single technology
+/research-stack --refresh              # Refresh all stale profiles (manifest-driven)
+/research-stack --refresh instantly    # Refresh a specific profile
 ```
 
-**Process:**
+**Full generation process:**
 1. Reads PRD Section 3 (Technology Decisions) to identify technologies
 2. For each technology: researches official docs, community knowledge via WebSearch
 3. Produces structured profile with auth, endpoints, rate limits, gotchas, validation hooks
 4. **Agent Teams**: Spawns parallel researchers (one per technology)
 
+**Refresh mode** (`--refresh`): Lightweight update for profiles past the 7-day freshness window.
+1. Reads manifest to identify stale profiles (or targets a named technology)
+2. Per profile: re-checks auth flows, rate limits, SDK versions, and breaking changes since last `generated_at` date
+3. Updates only Sections 1 (auth), 4 (rate limits), 6 (SDK), 7 (gotchas) — preserves everything else
+4. Updates manifest timestamps and freshness status
+
 **Output:** `.agents/reference/{technology}-profile.md` per technology
 
-**Run once.** Profiles persist across sessions and are consumed by all downstream commands.
+**Manifest write:** Adds/updates `profiles` entries (path, generated_at, status, freshness, used_in_phases) after both full generation and refresh.
+
+**Run once for full generation.** Use `--refresh` when `/prime` flags stale profiles.
 
 ---
 
@@ -186,30 +209,42 @@ Creates comprehensive implementation plan consuming PRD and technology profiles.
 - Step-by-step tasks referencing profile endpoints
 - Validation strategy mapped to PRD scenarios
 
+**Manifest write:** Appends to `plans` list and sets `phases.[N].plan` to `complete`.
+
 ---
 
 ### Build Phase
 
 #### `/execute`
-Executes a development plan with intelligent task parallelization.
+Executes a development plan with intelligent task parallelization. Creates a git checkpoint before execution for safe rollback on failure.
 
 ```bash
 /execute .agents/plans/phase-1.md
 ```
 
 **Process:**
-1. Parses plan, loads technology profiles
-2. Analyzes task dependencies, builds dependency graph
-3. **Agent Teams Mode**: Groups independent tasks into parallel batches, spawns teammates
-4. **Sequential Mode**: Executes tasks one at a time (fallback)
-5. Tracks progress in `.agents/progress/`
-6. Runs validation phase with unit tests
+1. **Create checkpoint** — Tags current HEAD as `piv-checkpoint/{phase}-{timestamp}`, records in manifest
+2. Parses plan, loads technology profiles
+3. Analyzes task dependencies, builds dependency graph
+4. **Agent Teams Mode**: Groups independent tasks into parallel batches, spawns teammates
+5. **Sequential Mode**: Executes tasks one at a time (fallback)
+6. Tracks progress in `.agents/progress/`
+7. Runs validation phase with unit tests
+8. **On failure**: Classifies error, writes to manifest `failures` section, outputs `## PIV-Error` block
 
 **Agent Teams parallelization:**
 - Independent tasks run simultaneously across teammates
 - Teammates share code through git push/pull
 - Direct messaging for integration questions
 - Lead coordinates overall flow
+
+**Failure handling:**
+- On task failure: error is classified (e.g., `syntax_error`), written to manifest with retry count
+- On retry: resumes from the failed task (completed tasks are not re-run)
+- On retries exhausted: recommends rollback to checkpoint + human escalation
+- Checkpoint remains active until `/commit` succeeds
+
+**Manifest write:** Appends to `executions` list (phase, status, tasks_total/done/blocked), updates `phases.[N].execution`. On failure: writes to `failures` and `checkpoints` sections.
 
 ---
 
@@ -246,6 +281,15 @@ Scenario-based validation testing agent behavior against PRD definitions.
 - Technology integration health checks
 
 **Agent Teams**: Parallel validation — one teammate per scenario category.
+
+**Failure handling:**
+- Level 1/2 failures → classified as `syntax_error` or `test_failure`, written to manifest
+- Scenario mismatches → classified as `scenario_mismatch` with PRD reference
+- Integration auth failures → classified as `integration_auth`, immediate escalation
+- Rate limit hits → classified as `integration_rate_limit` with backoff guidance
+- All failures output a `## PIV-Error` block to terminal and write to manifest
+
+**Manifest write:** Appends to `validations` list (path, phase, status, scenarios_passed/failed/skipped) and sets `phases.[N].validation` to `pass`/`partial`/`fail`. On failure: writes to `failures` section.
 
 #### `/commit`
 Creates git commits following project conventions.
@@ -455,12 +499,178 @@ Hooks are **disabled by default** — manual workflow stays clean.
 
 A single autonomous "PIV Automator" agent that:
 1. Starts from a goal or last artifact state
-2. Runs `/prime` → parses hooks → decides next command and arguments
-3. Loops on failures using validation hooks (`retry_remaining`, `suggested_action`)
-4. Mimics phase isolation with intelligent `/clear` + `/prime`
-5. Uses regex on `## PIV-Automator-Hooks` for fast, deterministic decisions
+2. Runs `/prime` → reads manifest `next_action` (failure-aware) → executes the recommended command
+3. Each command updates the manifest → `/prime` re-reconciles → picks next action
+4. On failure: reads error category and retry budget from manifest → retries if eligible, rolls back to checkpoint if exhausted
+5. Mimics phase isolation with intelligent `/clear` + `/prime`
+6. Uses manifest for deterministic state (phases, failures, checkpoints) and hooks for per-artifact metadata
 
-Hooks are deliberately minimal and boring — enabling fast, deterministic parsing without LLM inference.
+The manifest provides the **deterministic state loop** (where am I, what failed, what's next), the **failure intelligence** (error categories, retry counts, checkpoint references), and hooks provide **per-artifact metadata** (confidence, suggested action). Together they enable fully autonomous orchestration with safe failure recovery.
+
+---
+
+## State Awareness & Manifest
+
+The framework tracks project state in `.agents/manifest.yaml` — a YAML file that provides deterministic, machine-readable state instead of inference-based guessing.
+
+### What the Manifest Tracks
+
+| Section | Purpose |
+|---------|---------|
+| `phases` | Plan, execution, and validation status per PRD phase |
+| `prd` | Path, generation date, phases defined |
+| `profiles` | Per-technology: path, generation date, freshness (fresh/stale), phases used in |
+| `plans` | List of generated plans with phase, status, date |
+| `executions` | List of execution runs with task counts and status |
+| `validations` | List of validation runs with scenario pass/fail/skip counts |
+| `checkpoints` | Git tag checkpoints with phase, status (active/resolved) |
+| `failures` | Error history with category, retry count, resolution status, checkpoint reference |
+| `next_action` | Recommended next command, argument, reason, confidence (failure-aware) |
+| `settings` | `profile_freshness_window: 7d` |
+
+### How It Works
+
+1. **`/prime` builds and reconciles** — On first run, scans existing artifacts and builds the manifest. On every run, reconciles manifest against disk (catches manual edits, deletions), recalculates profile freshness, detects coverage gaps, and writes a `next_action` recommendation.
+
+2. **All other PIV commands update it** — `/create-prd` initializes phases, `/research-stack` writes profile entries, `/plan-feature` marks plan complete, `/execute` records task counts, `/validate-implementation` records scenario results.
+
+3. **Profile freshness** — Profiles older than 7 days (configurable via `profile_freshness_window` in CLAUDE.md) are flagged as `stale`. `/prime` recommends `/research-stack --refresh` to update them.
+
+4. **Coverage gap detection** — `/prime` identifies the next unfinished phase, checks which technologies it references, and flags any that lack a profile or have a stale profile.
+
+### Manifest-Driven Recommendations
+
+Instead of a static if/else chain, `/prime` now uses manifest state to prioritize the next action:
+
+1. Stale/missing profiles needed for next phase? → `/research-stack --refresh`
+2. No PRD? → `/create-prd`
+3. Next phase has no plan? → `/plan-feature "Phase N"`
+4. Plan exists, not executed? → `/execute`
+5. Executed, not validated? → `/validate-implementation`
+6. Validated? → `/commit`
+
+The recommendation is written to the manifest `next_action` block, making it parseable by a future autonomous orchestrator.
+
+### Shared Conventions
+
+- Always read manifest before writing — merge, never overwrite
+- Timestamps use ISO 8601 (`YYYY-MM-DDTHH:MM:SSZ`)
+- Create `.agents/` directory if it doesn't exist before writing
+- Preserve existing entries — append new plans/validations, don't replace
+- Phase status values: `not_started`, `in_progress`, `complete` (plan/execution); `not_run`, `pass`, `partial`, `fail` (validation)
+
+### Legacy Fallback
+
+Pass `--no-manifest` to `/prime` to skip all manifest operations and use the original file-scanning behavior.
+
+---
+
+## Failure Intelligence & Error Handling
+
+When commands fail, the framework classifies the error, writes structured failure data to the manifest, and outputs a machine-readable `## PIV-Error` block to terminal. This ensures failure context survives `/clear` + `/prime` cycles and enables informed recovery decisions.
+
+### Error Taxonomy
+
+Every failure is classified into one of these categories, each with a defined recovery path:
+
+| Category | Where It Happens | Recovery Action | Max Retries |
+|----------|-----------------|-----------------|-------------|
+| `syntax_error` | `/execute`, `/validate` L1 | Auto-fix and retry | 2 |
+| `test_failure` | `/execute` validation, `/validate` L2 | Auto-fix and retry | 2 |
+| `scenario_mismatch` | `/validate` Phase 3 | Re-read PRD, adjust implementation | 1 |
+| `integration_auth` | `/validate` Tier 1, `/research-stack` | Escalate to human immediately | 0 |
+| `integration_rate_limit` | `/validate` Tier 2-3 | Wait with backoff, retry | 3 |
+| `stale_artifact` | `/prime` reconciliation | Auto-refresh via `/research-stack --refresh` | 1 |
+| `prd_gap` | `/plan-feature` Phase 0 | Escalate — PRD needs human revision | 0 |
+| `partial_execution` | `/execute` | Rollback to checkpoint, escalate | 0 |
+| `line_budget_exceeded` | `/create-prd`, `/plan-feature` | Auto-trim and retry | 1 |
+
+Categories with 0 retries always escalate to the human. Categories with retries attempt automatic recovery before escalating.
+
+### PIV-Error Block
+
+Always-on structured error output (not gated by hooks). Appears in terminal on any command failure:
+
+```
+## PIV-Error
+error_category: syntax_error
+command: execute
+phase: 2
+details: "TypeScript compilation failed in src/agent/tools.ts:45"
+retry_eligible: true
+retries_remaining: 1
+checkpoint: piv-checkpoint/phase-2-2026-02-10T16:30:00Z
+```
+
+This data is also written to the manifest `failures` section for persistence.
+
+### Git Checkpointing
+
+Before `/execute` modifies any source code, it creates a lightweight git tag marking the current clean state:
+
+```
+piv-checkpoint/phase-2-2026-02-10T16:30:00Z
+```
+
+**This is NOT a commit of new code.** It's a bookmark of the known-good state *before* execution starts — like a save point before a boss fight.
+
+**When things go well:**
+```
+CHECKPOINT → /execute (all tasks pass) → /validate (passes) → /commit → checkpoint resolved
+```
+
+**When things fail:**
+```
+CHECKPOINT → /execute (task 7 fails) → /clear + /prime → sees failure in manifest
+           → retry /execute (resumes from task 7) → succeeds → /validate → /commit → resolved
+```
+
+**When retries are exhausted:**
+```
+CHECKPOINT → /execute fails → retry fails → /prime recommends rollback
+           → git reset --hard piv-checkpoint/... → clean state restored → human decides next step
+```
+
+### Retry vs Rollback
+
+These are different actions:
+
+- **Retry** = Don't rollback. Tasks 1-6 are fine. Fix the error in task 7 and resume from there. The `.agents/progress/` file tracks what's done.
+- **Rollback** = Retries exhausted or `partial_execution` error. Reset to checkpoint, discard ALL execution changes, give the human a clean slate with the full failure history in the manifest.
+
+### Failure-Aware Recommendations
+
+`/prime` reads failure and checkpoint data from the manifest and adjusts its `next_action` accordingly:
+
+| Manifest State | Recommendation |
+|---------------|----------------|
+| Active checkpoint + pending failure + retries remaining | "Retry `/execute` — fix [error details]" |
+| Active checkpoint + pending failure + no retries | "Rollback to checkpoint + escalate to human" |
+| Active checkpoint + no failure | "Execution was interrupted — resume `/execute`" |
+| Resolved checkpoint + no failures | Normal flow — recommend next PIV command |
+
+### Manifest Extensions
+
+Phase 2 adds `checkpoints` and `failures` sections:
+
+```yaml
+checkpoints:
+  - tag: piv-checkpoint/phase-2-2026-02-10T16:30:00Z
+    phase: 2
+    created_before: execute
+    status: active       # active | resolved
+
+failures:
+  - command: execute
+    phase: 2
+    error_category: syntax_error
+    timestamp: 2026-02-10T17:00:00Z
+    retry_count: 1
+    max_retries: 2
+    checkpoint: piv-checkpoint/phase-2-2026-02-10T16:30:00Z
+    resolution: pending  # pending | auto_fixed | rolled_back | escalated
+    details: "TypeScript compilation failed in src/agent/tools.ts:45"
+```
 
 ---
 
@@ -473,16 +683,19 @@ your-project/
 ├── .claude/
 │   └── commands/           # PIV commands (copy from piv-dev-kit)
 ├── .agents/
+│   ├── manifest.yaml       # State tracking (phase progress, freshness, next action)
 │   ├── plans/              # Implementation plans
 │   │   ├── phase-1-foundation.md
 │   │   └── phase-2-agent.md
 │   ├── validation/         # Validation reports
 │   │   ├── phase-1-2026-02-05.md
 │   │   └── phase-2-2026-02-05.md
-│   └── reference/          # Technology profiles (from /research-stack)
-│       ├── instantly-api-profile.md
-│       ├── x-api-profile.md
-│       └── elevenlabs-profile.md
+│   ├── reference/          # Technology profiles (from /research-stack)
+│   │   ├── instantly-api-profile.md
+│   │   ├── x-api-profile.md
+│   │   └── elevenlabs-profile.md
+│   └── progress/           # Execution progress tracking
+│       └── phase-1-progress.md
 ├── CLAUDE.md               # Project rules (with Agent Teams playbook)
 ├── PRD.md                  # Agent-native requirements
 └── src/                    # Your code
@@ -513,12 +726,13 @@ your-project/
 - Run `/research-stack` once after PRD
 - Let it research official docs AND community knowledge
 - Review profiles for accuracy before planning
+- Use `/research-stack --refresh` when `/prime` flags stale profiles (7-day window)
 - Update profiles if implementation reveals gaps
 
 **Don't:**
 - Skip research and guess at API patterns
 - Run before the PRD exists
-- Rerun for every phase (profiles persist)
+- Rerun full generation for every phase (profiles persist — use `--refresh` for updates)
 
 ### Validation
 
@@ -538,26 +752,28 @@ your-project/
 
 ## Command Cheat Sheet
 
-| Command | When to Use | Output |
-|---------|-------------|--------|
-| `/prime` | Start of session | Terminal summary + next step |
-| `/create-prd` | New project/feature | `PRD.md` (agent-native) |
-| `/create_global_rules_prompt` | New project setup | `CLAUDE.md` |
-| `/research-stack` | After PRD, before planning (once) | `.agents/reference/*.md` |
-| `/plan-feature` | Before implementing each phase | `.agents/plans/*.md` |
-| `/plan-feature --reflect` | Extended reflection pass | `.agents/plans/*.md` |
-| `/execute` | After plan approved | Implemented code |
-| `/validate-implementation` | After execution | `.agents/validation/*.md` |
-| `/validate-implementation --full` | Before shipping | Full scenario results |
-| `/commit` | After validation | Git commit |
-| `/create_reference` | Need documentation | `.agents/reference/*.md` |
-| `/orchestrate-analysis` | Complex codebase analysis | Analysis report |
+| Command | When to Use | Output | Manifest Write |
+|---------|-------------|--------|----------------|
+| `/prime` | Start of session | Terminal summary + next step | Builds/reconciles full manifest, writes `next_action` |
+| `/create-prd` | New project/feature | `PRD.md` (agent-native) | `prd` entry + initializes `phases` |
+| `/create_global_rules_prompt` | New project setup | `CLAUDE.md` | None |
+| `/research-stack` | After PRD, before planning (once) | `.agents/reference/*.md` | `profiles` entries |
+| `/research-stack --refresh` | When profiles are stale (7+ days) | Updated profiles | `profiles` freshness timestamps |
+| `/plan-feature` | Before implementing each phase | `.agents/plans/*.md` | Appends to `plans`, updates phase plan status |
+| `/plan-feature --reflect` | Extended reflection pass | `.agents/plans/*.md` | Same as above |
+| `/execute` | After plan approved | Implemented code | Creates checkpoint, appends to `executions`, writes `failures` on error |
+| `/validate-implementation` | After execution | `.agents/validation/*.md` | Appends to `validations`, writes `failures` on error |
+| `/validate-implementation --full` | Before shipping | Full scenario results | Same as above |
+| `/commit` | After validation | Git commit | Resolves active checkpoint |
+| `/create_reference` | Need documentation | `.agents/reference/*.md` | None |
+| `/orchestrate-analysis` | Complex codebase analysis | Analysis report | None |
 
 **Global flags** (work on any command):
 | Flag | Effect |
 |------|--------|
 | `--with-hooks` | Enable PIV-Automator-Hooks for this run |
 | `--no-hooks` | Disable hooks for this run |
+| `--no-manifest` | Skip manifest operations (`/prime` only) |
 
 ---
 
@@ -581,9 +797,41 @@ ls .agents/plans/  # Check what exists
 - Check if external services are reachable
 - Review mock strategy in technology profile Section 9
 
+### `/prime` reports stale profiles
+```bash
+/research-stack --refresh              # Refresh all stale profiles
+/research-stack --refresh instantly    # Refresh a specific profile
+/prime                                 # Re-run to verify freshness
+```
+
+### `/execute` failed partway through
+```bash
+/clear
+/prime                  # Shows failure details, retry count, checkpoint
+# Follow the recommendation — retry or rollback
+```
+If retries are exhausted and you want to rollback:
+```bash
+git reset --hard piv-checkpoint/phase-N-...    # Revert to clean state
+git clean -fd                                   # Remove untracked files from execution
+/prime                                          # Confirm clean state
+```
+
+### `/validate-implementation` reports scenario mismatch
+- Check PRD Section 4.3 — does the scenario definition match what was implemented?
+- `/prime` will show the failure details and recommend retry or escalation
+- If the implementation approach is wrong, rollback to checkpoint and re-plan
+
+### Manifest out of sync
+If you manually add/delete files in `.agents/`, `/prime` will detect the mismatch on next run and reconcile automatically. To reset completely:
+```bash
+rm .agents/manifest.yaml    # Delete manifest
+/prime                       # Rebuilds from scratch
+```
+
 ### Context lost after /clear
 ```bash
-/prime  # Reloads context, discovers profiles, shows next step
+/prime  # Reloads context, reconciles manifest, shows next step
 ```
 
 ### Agent Teams not working
@@ -621,16 +869,16 @@ MIT - Use freely for your agent development projects.
 
 The PIV Dev Kit transforms AI agent development from chaotic to systematic:
 
-1. **Prime** - Build context that persists
+1. **Prime** - Build context that persists, reconcile manifest state
 2. **Define** - Agent-native PRD with behavior specs and scenarios
-3. **Research** - Deep technology profiles (run once)
+3. **Research** - Deep technology profiles (run once, `--refresh` to keep fresh)
 4. **Plan** - Technology-informed, scenario-mapped implementation plans
 5. **Build** - Parallel execution with Agent Teams
 6. **Verify** - Scenario-based validation proving the agent behaves correctly
 
-Every command uses **structured Chain-of-Thought reasoning** internally, outputs **visible reasoning summaries** for transparency, and performs **self-reflection** to catch gaps before human review. Optional **PIV-Automator-Hooks** prepare artifacts for future autonomous SDK orchestration.
+Every command uses **structured Chain-of-Thought reasoning** internally, outputs **visible reasoning summaries** for transparency, and performs **self-reflection** to catch gaps before human review. The **`.agents/manifest.yaml`** provides deterministic state tracking — phase progress, profile freshness, coverage gaps, failure history, checkpoint status, and failure-aware next-action recommendations. **Git checkpointing** before execution enables safe rollback, and a **structured error taxonomy** with per-category retry budgets ensures failures are handled predictably. Optional **PIV-Automator-Hooks** prepare per-artifact metadata for future autonomous SDK orchestration.
 
-Every phase produces artifacts that survive context resets, enabling true iterative development with AI assistance.
+Every phase produces artifacts that survive context resets. The manifest ensures the framework always knows exactly where the project stands, what went wrong, and how to recover.
 
 **Start here:**
 ```bash

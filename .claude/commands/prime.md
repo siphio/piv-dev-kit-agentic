@@ -31,12 +31,12 @@ Before producing the output report, think step by step:
 4. Check artifact freshness — are plans/profiles outdated relative to recent commits?
 5. Determine the precise next step based on current PIV loop position
 
-## Hook Toggle
+## Hooks
 
-Check CLAUDE.md for `## PIV Configuration` → `hooks_enabled` setting.
-If arguments contain `--with-hooks`, enable hooks. If `--no-hooks`, disable.
+Hooks are always enabled. `## PIV-Automator-Hooks` is appended to terminal output (this command does not produce a file artifact).
+
 If arguments contain `--no-manifest`, skip all manifest operations (legacy fallback).
-Strip all flags from arguments before processing reference file keywords.
+Strip flags from arguments before processing reference file keywords.
 
 ## Process
 
@@ -78,8 +78,12 @@ Run every time (even on existing manifests):
    - Cross-reference plan files, progress files, and validation files against phase entries
    - Ensure phase statuses reflect actual artifact state
 
-4. **Write reconciled manifest back to `.agents/manifest.yaml`**
-5. **Update `last_updated` timestamp** (ISO 8601)
+4. **Read `failures` and `checkpoints` sections** from manifest into memory for use in Step 0d
+
+5. **Handle `stale_artifact` error category:** If manifest/disk mismatch is detected that can't be auto-resolved (e.g., file referenced by active execution but missing), classify as `stale_artifact`, write to manifest `failures` section, output `## PIV-Error` block
+
+6. **Write reconciled manifest back to `.agents/manifest.yaml`**
+7. **Update `last_updated` timestamp** (ISO 8601)
 
 ### 0c. Coverage Gap Detection
 
@@ -90,6 +94,29 @@ Run every time (even on existing manifests):
    - **Missing profiles**: Technology referenced in phase but no profile exists
    - **Stale profiles**: Profile exists but `freshness: stale`
 5. Store coverage gaps for use in the output report and next-action recommendation
+
+### 0d. Failure Assessment
+
+> Runs after coverage gap detection. Reads failure and checkpoint state from manifest.
+
+1. **Read `checkpoints` section:** Identify any with `status: active`
+2. **Read `failures` section:** Identify any with `resolution: pending`
+3. **For pending failures:** Check `retry_count` vs `max_retries` from error taxonomy
+4. **Determine failure state:**
+   - Retries remaining → can retry
+   - No retries remaining → needs rollback or escalation
+   - Active checkpoint + no failure → execution was interrupted
+   - No active checkpoints, no pending failures → clean state
+
+5. **Read `notifications` section:** Identify any unacknowledged notifications
+   - `blocking: true` with `acknowledged` absent or `false` → report as active blocker
+   - `blocking: false` with `acknowledged` absent or `false` → include in status report as informational
+   - `acknowledged: true` → skip (already forwarded by orchestrator)
+
+6. **Read `preflight` section:** Check credential verification status
+   - If `preflight.status: passed` → credentials are verified, autonomous execution is cleared
+   - If `preflight.status: blocked` → credentials are missing, report as active blocker
+   - If no `preflight` entry → preflight has not been run yet
 
 ### 1. Analyze Project Structure
 
@@ -216,16 +243,25 @@ Report:
 - Reconciliation results: [N files matched, N warnings]
 - Profile freshness: [N fresh, N stale, N missing]
 - Coverage gaps: [list or "none"]
+- Active checkpoints: [list with tag name and phase, or "none"]
+- Pending failures: [list with error_category, retry count/max, details — or "none"]
+- Pending notifications: [list with type, severity, details — or "none"]
+- Pre-flight status: [passed | blocked | not run]
+- Resolution recommendation: [retry guidance, rollback recommendation, or "clean state"]
 
 ### Recommended Next Step
 
 **If manifest is available**, use manifest-driven priority logic (highest priority first):
-1. Stale or missing profiles needed for next phase? → "Run `/research-stack --refresh` to update stale profiles" or "Run `/research-stack` to generate missing profiles"
-2. No PRD? → "Run `/create-prd` to define requirements"
-3. Next phase has no plan? → "Run `/plan-feature \"Phase N: Name\"` to start planning"
-4. Plan exists, not executed? → "Run `/execute .agents/plans/[plan].md`"
-5. Executed, not validated? → "Run `/validate-implementation`"
-6. Validated? → "Run `/commit` to ship"
+0. **PRD validated but `/preflight` not run?** → "Run `/preflight` to verify credentials and environment before autonomous execution" (triggers when: PRD complete + profiles exist + `preflight` section absent from manifest OR `preflight.status != passed`)
+1. **Pending failure + retries remaining?** → "Retry `/execute` — fix [details from failure entry]"
+2. **Pending failure + no retries remaining?** → "Rollback to checkpoint `[tag]` and escalate — [details]"
+3. **Active checkpoint + no failure?** → "Execution interrupted — resume `/execute [plan path]`"
+4. Stale or missing profiles needed for next phase? → "Run `/research-stack --refresh` to update stale profiles" or "Run `/research-stack` to generate missing profiles" (also covers `stale_artifact` error category)
+5. No PRD? → "Run `/create-prd` to define requirements"
+6. Next phase has no plan? → "Run `/plan-feature \"Phase N: Name\"` to start planning"
+7. Plan exists, not executed? → "Run `/execute .agents/plans/[plan].md`"
+8. Executed, not validated? → "Run `/validate-implementation`"
+9. Validated? → "Run `/commit` to ship"
 
 Write the recommendation to the manifest `next_action` block:
 ```yaml
@@ -272,9 +308,9 @@ Format:
 - ✅/⚠️ [Finding]
 ```
 
-### PIV-Automator-Hooks (If Enabled)
+### PIV-Automator-Hooks
 
-If hooks are enabled, append to terminal output:
+Append to terminal output:
 
 ```
 ## PIV-Automator-Hooks

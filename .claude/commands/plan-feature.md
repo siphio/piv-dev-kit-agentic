@@ -51,18 +51,18 @@ During Phase 5 (Strategic Thinking), reason step by step:
 4. Which technology profile constraints shape the implementation?
 5. How do PRD decision trees map to concrete code?
 
-## Hook Toggle
+## Hooks
 
-Check CLAUDE.md for `## PIV Configuration` → `hooks_enabled` setting.
-If arguments contain `--with-hooks`, enable hooks. If `--no-hooks`, disable.
+Hooks are always enabled. `## PIV-Automator-Hooks` is appended to the plan file.
+
 If arguments contain `--reflect`, perform an extended reflection pass before finalizing.
-Strip all flags from arguments before using remaining text as the feature description.
+Strip flags from arguments before using remaining text as the feature description.
 
 ## Planning Process
 
-> **Note:** If a PRD exists, start with Phase 0 (Scope Analysis) and output recommendations to terminal. Proceed to Phase 1 only after user validates the approach.
+> **Note:** If a PRD exists, start with Phase 0 (Scope Analysis). The agent generates recommendations, self-validates them against PRD criteria, and proceeds to Phase 1 autonomously.
 
-### Phase 0: Scope Analysis & Recommendations (If PRD Exists)
+### Phase 0: Scope Analysis & Autonomous Self-Validation (If PRD Exists)
 
 > **When to run this phase:** If a PRD exists for the project (`.agents/PRD.md` or similar), run this phase FIRST. Check for research profiles in `.agents/reference/` before generating recommendations.
 
@@ -123,15 +123,66 @@ Strip all flags from arguments before using remaining text as the feature descri
    → [Your recommendation]
    Why: [Justification]
 
----
-
-Ready to generate plan with these decisions, or would you like to discuss any recommendations?
 ```
 
-**After User Validation:**
-- If user confirms: Proceed to Phase 1 with decisions locked in
-- If user adjusts: Update recommendations, confirm again
-- Document final decisions in the plan's NOTES section
+**On PRD Gap Detected (missing info needed for planning):**
+When information is missing from the PRD that affects a decision:
+1. Make best-effort decision based on available context (PRD, technology profiles, codebase patterns)
+2. Document the assumption explicitly in the plan's NOTES section:
+   "PRD does not specify [X]. Assumed [Y] because [reasoning]. If incorrect, this affects tasks [list]."
+3. Write to manifest `failures` section with `resolution: auto_resolved_with_assumption`
+4. Write to manifest `notifications` section (type: escalation, severity: warning, blocking: false)
+5. Output `## PIV-Error` block but continue planning — do NOT halt:
+```
+## PIV-Error
+error_category: prd_gap
+command: plan-feature
+phase: [N]
+details: "[what information is missing — and what was assumed instead]"
+retry_eligible: false
+retries_remaining: 0
+checkpoint: none
+```
+
+### Pass 2: Self-Validation Against PRD Criteria
+
+After generating recommendations in Pass 1 (steps 1-5 above), systematically verify each recommendation before proceeding to plan generation:
+
+**For each recommendation, verify:**
+
+1. **PRD Alignment** — Does this serve the user stories for this phase?
+   - Re-read the specific user story acceptance criteria from PRD Section 5
+   - Verify the recommendation directly enables at least one acceptance criterion
+   - If not aligned: revise recommendation
+
+2. **Technology Fit** — Does this respect constraints in the technology profiles?
+   - Check rate limits, auth requirements, SDK capabilities from `.agents/reference/`
+   - Verify the recommended approach is actually possible with the available APIs
+   - If profile contradicts recommendation: revise to fit technology constraints
+
+3. **Codebase Consistency** — Does this match existing patterns?
+   - Check if similar decisions were made in completed phases
+   - Verify no contradiction with established architecture
+   - If inconsistent: either align with existing pattern or document WHY this deviates
+
+4. **Simplicity Check** — Is there a simpler approach that achieves the same goal?
+   - If a simpler path exists and satisfies criteria equally, prefer it
+
+5. **Risk Assessment** — What could go wrong with this choice?
+   - Identify the primary failure mode
+   - Verify error recovery exists in PRD Section 4.4
+   - If no recovery path: flag in plan NOTES section
+
+**Complex Decision Escalation:**
+For decisions involving multiple technologies interacting or contradicting patterns from previous phases, spawn a sub-agent (Task tool) as an adversarial critic:
+- Sub-agent receives: PRD phase, the recommendations, relevant technology profiles
+- Sub-agent task: find flaws, contradictions, or missed alternatives
+- Main agent incorporates feedback or overrides with documented reasoning
+
+**After self-validation passes:**
+- Lock in validated recommendations
+- Document final reasoning in the plan's NOTES section (traceability for why decisions were made)
+- Proceed directly to Phase 1 (Feature Understanding)
 
 ### Phase 1: Feature Understanding
 
@@ -636,8 +687,6 @@ npm run format:check
 
 ## PIV-Automator-Hooks
 
-> **Only include this section when hooks are enabled (CLAUDE.md `hooks_enabled: true` or `--with-hooks` flag).**
-
 plan_status: ready_for_execution
 phase_source: [Phase N from PRD]
 independent_tasks_count: [N]
@@ -699,6 +748,19 @@ The plan must contain ONLY valuable, actionable information. Every line must ear
 2. If < 500 lines: Add missing detail until you reach 500+
 3. If > 750 lines: Cut low-value content until you reach 750 or below
 4. Only submit when line count is between 500-750 inclusive
+
+**On line budget exceeded (after one auto-trim/expand retry):**
+Classify as `line_budget_exceeded`. Write to manifest `failures` section. Output `## PIV-Error` block:
+```
+## PIV-Error
+error_category: line_budget_exceeded
+command: plan-feature
+phase: [N]
+details: "Plan is [N] lines — [over 750|under 500] after auto-trim/expand attempt"
+retry_eligible: true
+retries_remaining: [1 minus existing retry_count]
+checkpoint: none
+```
 
 ## Quality Criteria
 

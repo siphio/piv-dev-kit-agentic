@@ -14,7 +14,7 @@ This is a **meta-project** - a collection of Claude Code slash commands that imp
 2. **Context is King** - Every command should maximize useful context while minimizing noise
 3. **Self-contained phases** - Each PRD phase must work standalone after `/clear` + `/prime`
 4. **Line discipline** - PRDs: 500-750 lines, Plans: 500-750 lines. No exceptions.
-5. **Human checkpoints** - The framework enables discussion before implementation
+5. **Self-validation** - The framework validates decisions against PRD criteria before implementation
 
 ## 3. Terminal Output Standards
 
@@ -166,26 +166,28 @@ When working on this project:
 
 When running `/plan-feature` on a project with a PRD:
 
-**Phase 0: Scope Analysis (Terminal Output)**
+**Phase 0: Scope Analysis & Autonomous Self-Validation**
 1. Read the PRD phase being planned
 2. Extract user stories, prerequisites, scope boundaries
 3. Identify decision points from "Discussion Points" sections
-4. Output recommendations with justifications to terminal:
-   ```
-   ### Recommendations
+4. Generate recommendations with justifications (Pass 1)
 
-   1. **[Decision Point]**
-      → [Recommendation]
-      Why: [Justification - how this serves the goal]
-   ```
-5. Wait for user validation (confirm or discuss changes)
+**Pass 2: Self-Validation Against PRD Criteria**
+For each recommendation, verify:
+1. **PRD Alignment** — Does this serve the user stories for this phase?
+2. **Technology Fit** — Does this respect constraints in the technology profiles?
+3. **Codebase Consistency** — Does this match existing patterns?
+4. **Simplicity Check** — Is there a simpler approach that achieves the same goal?
+5. **Risk Assessment** — What could go wrong with this choice?
+
+For complex multi-technology decisions, spawn a sub-agent as an adversarial critic to find flaws or missed alternatives.
 
 **Plan Generation (File Output)**
-- Only proceed after user validates approach
+- Proceed directly after self-validation passes — no human checkpoint
 - Bake validated decisions into the plan
-- Document decisions in NOTES section so executor understands constraints
+- Document decisions and reasoning in NOTES section for traceability
 
-**Key Principle:** Recommendations must include WHY - the justification based on PRD requirements, user stories, or codebase patterns. This enables informed validation.
+**Key Principle:** Recommendations must include WHY — the justification based on PRD requirements, user stories, or codebase patterns. Self-validation ensures quality without human intervention.
 
 ## 12. PIV Configuration
 
@@ -193,18 +195,94 @@ Settings that control PIV command behavior across all commands.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| hooks_enabled | false | Append `## PIV-Automator-Hooks` to file artifacts |
 | profile_freshness_window | 7d | Profiles older than this are flagged as stale by `/prime` |
+| checkpoint_before_execute | true | Create git tag before /execute runs |
+| mode | autonomous | Framework operates without human checkpoints (except PRD creation) |
+| reasoning_model | opus-4-6 | Model used for all autonomous reasoning and self-validation |
+| validation_mode | full | Always run full live validation including Tier 3 |
+| agent_teams | prefer_parallel | Use Agent Teams for parallel execution whenever available |
 
 **Current Settings:**
-- hooks_enabled: false
+- Hooks are always enabled — all commands append `## PIV-Automator-Hooks` to their primary file artifact.
 - profile_freshness_window: 7d
+- checkpoint_before_execute: true
+- mode: autonomous
+- reasoning_model: opus-4-6
+- validation_mode: full
+- agent_teams: prefer_parallel
 
-**Manifest**: The framework tracks project state in `.agents/manifest.yaml`. All PIV commands read and write to this file — phase progress, profile freshness, coverage gaps, and next-action recommendations. `/prime` builds and reconciles the manifest; other commands update it after producing artifacts. See the manifest structure in the spec for field definitions.
+**Manifest**: The framework tracks project state in `.agents/manifest.yaml`. All PIV commands read and write to this file — phase progress, profile freshness, coverage gaps, and next-action recommendations. `/prime` builds and reconciles the manifest; other commands update it after producing artifacts. When writing new settings to manifest, always MERGE with the existing `settings` section — never replace. Existing keys (e.g., `profile_freshness_window`) must be preserved alongside new ones.
 
-**Override per command:** Add `--with-hooks` or `--no-hooks` to any command invocation to override the project default for that run.
+### Context Window Pairings
 
-**How commands check this:** Read this section from CLAUDE.md. If `hooks_enabled: true`, append hooks. If argument contains `--with-hooks`, enable regardless. If `--no-hooks`, disable regardless.
+Commands that share a single context window before clearing:
+
+| Session | Commands | Notes |
+|---------|----------|-------|
+| PRD Creation | /create-prd, /create_global_rules_prompt | Human-in-the-loop via Telegram |
+| Research | /research-stack | One session per technology if sequential |
+| First Commit + Plan | /commit, /prime, /plan-feature | Plan follows immediately after priming |
+| Execution | /prime, /execute | Execute follows immediately after priming |
+| Validation | /prime, /validate-implementation | Validate follows immediately after priming |
+| Commit | /commit | Lightweight, own session |
+| Pre-flight | /preflight | Runs once before autonomous loop begins |
+
+### Error Taxonomy & Retry Budget
+
+Every command failure is classified into one of these categories with a mapped recovery action:
+
+| Category | Where It Happens | Recovery Action | Max Retries | Human Needed? |
+|----------|-----------------|-----------------|-------------|---------------|
+| `syntax_error` | `/execute`, `/validate` L1 | Auto-fix and retry | 2 | No (unless retries exhausted) |
+| `test_failure` | `/execute` validation, `/validate` L2 | Auto-fix and retry | 2 | No (unless retries exhausted) |
+| `scenario_mismatch` | `/validate` Phase 3 | Re-read PRD, adjust implementation | 1 | Maybe (after retry) |
+| `integration_auth` | `/validate` Tier 1, `/research-stack` | Escalate immediately | 0 | Yes — credentials are a human problem |
+| `integration_rate_limit` | `/validate` Tier 2-3 | Wait with backoff, retry | 3 | No |
+| `stale_artifact` | `/prime` reconciliation | Auto-refresh via `/research-stack --refresh` | 1 | No |
+| `prd_gap` | `/plan-feature` Phase 0 | Make best-effort assumption, document reasoning, continue | 0 | No — agent resolves with documented assumption |
+| `partial_execution` | `/execute` | Auto-rollback to checkpoint, retry once | 1 | Yes — only after auto-retry fails |
+| `line_budget_exceeded` | `/create-prd`, `/plan-feature` | Auto-trim and retry | 1 | No |
+
+On failure, all commands output a `## PIV-Error` block (always-on, not gated by hooks) and write to manifest `failures` section. Format:
+
+```
+## PIV-Error
+error_category: [taxonomy category]
+command: [command that failed]
+phase: [phase number if applicable]
+details: "[human-readable error description]"
+retry_eligible: [true|false]
+retries_remaining: [N]
+checkpoint: [tag name or "none"]
+```
+
+Hooks are always enabled. All commands append `## PIV-Automator-Hooks` to their primary file artifact. For commands that output only to terminal (e.g., `/prime`, `/commit`), the hooks block appears in terminal output.
+
+### Notifications
+
+Commands write structured notifications to manifest for the orchestrator to forward to Telegram:
+
+```yaml
+notifications:
+  - timestamp: [ISO 8601]
+    type: escalation | info | completion
+    severity: warning | critical | info
+    category: [error taxonomy category or "phase_complete"]
+    phase: [N]
+    details: "[human-readable description]"
+    blocking: [true|false]
+    action_taken: "[what the agent did or is waiting for]"
+    acknowledged: [true|false]
+```
+
+The orchestrator reads `blocking: true` to know when to pause and wait for human response (only `integration_auth` after `/preflight`, and `partial_execution` after auto-retry fails).
+
+**Notification Lifecycle:**
+- Commands APPEND notifications — they never delete or modify existing entries
+- The orchestrator reads notifications after each session, forwards to Telegram, and sets `acknowledged: true`
+- `/prime` only reports notifications where `acknowledged` is absent or `false`
+- Acknowledged notifications are retained for history but excluded from active reporting
+- The framework writes; the orchestrator manages lifecycle
 
 ## 13. Prompting & Reasoning Guidelines
 
@@ -254,7 +332,7 @@ Reflection output goes to **terminal only** — never into file artifacts. Forma
 
 ### Hook Block Format
 
-When hooks are enabled, append to the **end** of file artifacts:
+Append to the **end** of file artifacts:
 
 ```
 ## PIV-Automator-Hooks
@@ -272,12 +350,8 @@ Rules:
 ### Argument Parsing
 
 Commands that accept flags parse them from `$ARGUMENTS`:
-- Strip `--with-hooks` and `--no-hooks` from arguments before processing
 - Strip `--reflect` where applicable — currently supported only by `/plan-feature`; other commands ignore it
 - Strip `--no-manifest` where applicable — supported by `/prime` for legacy fallback without manifest
 - Strip `--refresh [tech-name]` where applicable — supported by `/research-stack` for stale profile updates
 - Remaining text is the actual argument (filename, phase name, etc.)
-
-### Manual Mode Preservation
-
-When hooks are disabled (the default), commands behave exactly as they did before this enhancement — no visible change in artifacts or terminal output except for the added Reasoning and Reflection sections in terminal.
+- `## PIV-Error` block is always-on — output on any command failure

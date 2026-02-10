@@ -25,11 +25,9 @@ Before committing, think step by step:
 3. Generate a descriptive message following project conventions
 4. Verify no sensitive files (.env, credentials) are staged
 
-## Hook Toggle
+## Hooks
 
-Check CLAUDE.md for `## PIV Configuration` → `hooks_enabled` setting.
-If arguments contain `--with-hooks`, enable hooks. If `--no-hooks`, disable.
-Strip flags from arguments before using remaining text as custom commit message.
+Hooks are always enabled. `## PIV-Automator-Hooks` is appended to terminal output (this command does not produce a file artifact).
 
 ## Process
 
@@ -74,7 +72,36 @@ If the branch doesn't have an upstream set:
 git push -u origin HEAD
 ```
 
-### 5. Verify Success
+### 5. Resolve Checkpoints and Failures
+
+After successful commit, update manifest checkpoint and failure state:
+1. Read `.agents/manifest.yaml`
+2. Find any `checkpoints` with `status: active` → update to `status: resolved`
+3. Find any `failures` with `resolution: pending` for the committed phase → update to `resolution: auto_fixed`
+4. Write updated manifest back to `.agents/manifest.yaml`
+5. Output checkpoint resolution to terminal:
+   ```
+   🔖 Checkpoint resolved: [tag name] → status: resolved
+   ✅ Failure cleared: [error_category] for phase [N] → resolution: auto_fixed
+   ```
+6. Write completion notification to manifest `notifications` section:
+   ```yaml
+   notifications:
+     - timestamp: [ISO 8601]
+       type: completion
+       severity: info
+       category: phase_complete
+       phase: [N]
+       details: "Phase [N] committed successfully. [N] files, [commit hash]"
+       blocking: false
+       action_taken: "Committed and pushed to remote"
+   ```
+7. Output notification to terminal:
+   ```
+   📬 Notification: Phase [N] committed — orchestrator will forward to Telegram
+   ```
+
+### 6. Verify Success
 
 Confirm the push was successful:
 ```bash
@@ -129,9 +156,9 @@ Quick self-critique (terminal only):
 - Were all relevant files included?
 - Does it follow project conventions?
 
-### PIV-Automator-Hooks (If Enabled)
+### PIV-Automator-Hooks
 
-If hooks are enabled, output to terminal after commit:
+Output to terminal after commit:
 
 ```
 ## PIV-Automator-Hooks

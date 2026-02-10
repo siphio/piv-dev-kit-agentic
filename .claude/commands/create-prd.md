@@ -60,11 +60,9 @@ When: Agent runs
 Then: Output
 ```
 
-## Hook Toggle
+## Hooks
 
-Check CLAUDE.md for `## PIV Configuration` → `hooks_enabled` setting.
-If arguments contain `--with-hooks`, enable hooks. If `--no-hooks`, disable.
-Strip hook flags from arguments before using remaining text as output filename.
+Hooks are always enabled. `## PIV-Automator-Hooks` is appended to the PRD file after generation.
 
 ---
 
@@ -380,6 +378,18 @@ Break MVP into 3-4 phases. Each phase: 40-55 lines.
 - Count lines before finalizing
 - **Must be 500-750 lines**
 - If trimming needed: compress non-agent sections first, NEVER trim Section 4
+- If PRD exceeds 750 or falls under 500 after generation: attempt one auto-trim/expand retry
+- **On line budget exceeded (after retry):** Classify as `line_budget_exceeded`. Write to manifest `failures` section. Output `## PIV-Error` block:
+  ```
+  ## PIV-Error
+  error_category: line_budget_exceeded
+  command: create-prd
+  phase: 0
+  details: "PRD is [N] lines — [over 750|under 500] after auto-trim/expand attempt"
+  retry_eligible: true
+  retries_remaining: [1 minus existing retry_count]
+  checkpoint: none
+  ```
 
 ### 6. Quality Checks
 - [ ] All sections present
@@ -437,9 +447,9 @@ Self-critique the generated PRD (terminal only):
 - Do all phases reference scenarios and technologies?
 - Is the line count within 500-750?
 
-### PIV-Automator-Hooks (If Enabled)
+### PIV-Automator-Hooks
 
-If hooks are enabled, append to the PRD file:
+Append to the PRD file:
 
 ```
 ## PIV-Automator-Hooks

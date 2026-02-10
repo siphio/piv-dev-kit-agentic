@@ -34,11 +34,11 @@ For each technology, write a structured profile to:
 
 Examples: `instantly-api-profile.md`, `x-api-profile.md`, `elevenlabs-profile.md`
 
-## Agent Teams Mode
+## Agent Teams Mode (Preferred)
 
-> **When Agent Teams is available**, this command naturally parallelizes. Each technology gets its own research teammate working simultaneously.
+> This command naturally parallelizes. Each technology gets its own research teammate working simultaneously. Agent Teams is the preferred execution mode.
 
-**With Agent Teams:**
+**With Agent Teams (default):**
 ```
 Team Lead reads PRD → identifies N technologies → spawns N research teammates
    ├── Teammate 1: Research Technology A → writes profile A
@@ -47,7 +47,7 @@ Team Lead reads PRD → identifies N technologies → spawns N research teammate
 All teammates work simultaneously, each producing their profile.
 ```
 
-**Without Agent Teams:**
+**Sequential fallback (if Agent Teams unavailable):**
 Research technologies sequentially, producing each profile before moving to the next.
 
 ## Reasoning Approach
@@ -66,10 +66,10 @@ After completing each profile, reflect:
 - Are there missing gotchas or undocumented limitations?
 - Does the testing tier classification cover all endpoints?
 
-## Hook Toggle
+## Hooks
 
-Check CLAUDE.md for `## PIV Configuration` → `hooks_enabled` setting.
-If arguments contain `--with-hooks`, enable hooks. If `--no-hooks`, disable.
+Hooks are always enabled. `## PIV-Automator-Hooks` is appended to each profile file.
+
 Strip flags from arguments. Check for `--only [tech]` to research single technology.
 Check for `--refresh [tech-name]` to enter refresh mode (see Refresh Mode section below).
 
@@ -87,6 +87,8 @@ Check for `--refresh [tech-name]` to enter refresh mode (see Refresh Mode sectio
 - If no manifest exists, fall back to checking file modification dates against `profile_freshness_window` from CLAUDE.md
 
 ### Step R2: Lightweight Profile Update (Per Stale Profile)
+
+**Error handling:** Same as Step 2 — classify auth failures as `integration_auth` (escalate immediately) and transient failures as `integration_rate_limit` (retry up to 2 times). Output `## PIV-Error` block on failure.
 
 For each stale profile:
 1. Read the existing profile file in full
@@ -140,6 +142,20 @@ For this technology, extract from the PRD:
 This context focuses the research. You're not documenting the entire API — only what this agent needs.
 
 ### Step 2: Research Official Documentation
+
+**On WebSearch/WebFetch failure:**
+- If auth-related (API docs behind login, gated content): classify as `integration_auth`. Write to manifest `failures` section (max_retries: 0). Output `## PIV-Error` block:
+  ```
+  ## PIV-Error
+  error_category: integration_auth
+  command: research-stack
+  phase: [N if applicable]
+  details: "[technology] documentation requires authentication — [URL] is gated"
+  retry_eligible: false
+  retries_remaining: 0
+  checkpoint: none
+  ```
+- If transient (timeout, 5xx, connection refused): retry up to 2 times with backoff. If still failing after retries, classify as `integration_rate_limit`, write to manifest, output `## PIV-Error` block with which technology failed and why
 
 Use WebSearch and WebFetch to find and read:
 
@@ -511,9 +527,9 @@ Each profile must:
 
 **Length guideline**: 150-400 lines per profile. Dense and actionable. The testing specification (Section 9) typically accounts for 30-40% of the profile.
 
-### PIV-Automator-Hooks Per Profile (If Enabled)
+### PIV-Automator-Hooks Per Profile
 
-If hooks are enabled, append to each profile file:
+Append to each profile file:
 
 ```
 ## PIV-Automator-Hooks

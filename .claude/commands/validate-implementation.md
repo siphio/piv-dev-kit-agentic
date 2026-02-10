@@ -19,10 +19,8 @@ argument-hint: [plan-file-path] [--full]
 ## Arguments
 
 - `$ARGUMENTS`: Plan file path (optional, defaults to most recent in `.agents/plans/`)
-- `--full`: Run all levels including full pipeline end-to-end (slower, may cost API credits)
 
-**Default runs Level 1 + Level 2 + Level 3** (syntax + components + scenarios)
-**With --full: adds Level 4** (full pipeline end-to-end)
+**Always runs all levels**: Level 1 (syntax) + Level 2 (components) + Level 3 (scenarios + live integration) + Level 4 (full pipeline end-to-end).
 
 ## Reasoning Approach
 
@@ -41,11 +39,11 @@ For scenario validation specifically:
 3. Execute and verify each assertion
 4. Document deviations with specific details
 
-## Hook Toggle
+## Hooks
 
-Check CLAUDE.md for `## PIV Configuration` → `hooks_enabled` setting.
-If arguments contain `--with-hooks`, enable hooks. If `--no-hooks`, disable.
-Strip `--with-hooks`, `--no-hooks`, and `--full` from arguments before using remaining text as plan path.
+Hooks are always enabled. `## PIV-Automator-Hooks` is appended to the validation report file.
+
+Strip `--full` from arguments if present (ignored — validation always runs full). Use remaining text as plan path.
 
 ---
 
@@ -176,12 +174,36 @@ Error: [error details]
 
 **Stop validation if Level 1 fails** - no point testing broken code.
 
+**On Level 1 failure:** Classify as `syntax_error`. Write to manifest `failures` section. Output `## PIV-Error` block:
+```
+## PIV-Error
+error_category: syntax_error
+command: validate-implementation
+phase: [N]
+details: "[which command failed and error output]"
+retry_eligible: true
+retries_remaining: [2 minus existing retry_count]
+checkpoint: [active checkpoint tag or "none"]
+```
+
 ### Level 2: Component Validation
 
 **Always run.** Execute each command from plan's Level 2.
 
 **Handle interactive commands:** Mark as "VERIFY MANUALLY"
 **Handle timeouts:** 60 second timeout, mark as ⚠️ TIMEOUT
+
+**On Level 2 failure:** Classify as `test_failure`. Write to manifest `failures` section. Output `## PIV-Error` block:
+```
+## PIV-Error
+error_category: test_failure
+command: validate-implementation
+phase: [N]
+details: "[which tests failed and error summary]"
+retry_eligible: true
+retries_remaining: [2 minus existing retry_count]
+checkpoint: [active checkpoint tag or "none"]
+```
 
 ---
 
@@ -214,6 +236,18 @@ These are read-only, zero-cost operations that verify connectivity and auth.
 - Continue with other technologies
 - Attempt mock fallback for dependent scenarios if fixtures exist
 
+**On auth failure (⚠️ AUTH FAILED):** Classify as `integration_auth`. Write to manifest `failures` section (max_retries: 0, immediate escalation). Output `## PIV-Error` block:
+```
+## PIV-Error
+error_category: integration_auth
+command: validate-implementation
+phase: [N]
+details: "[technology] authentication failed — credentials are a human problem"
+retry_eligible: false
+retries_remaining: 0
+checkpoint: [active checkpoint tag or "none"]
+```
+
 ### Step 2: Tier 2 — Auto-Live with Test Data (No Approval)
 
 Execute ALL Tier 2 tests automatically using pre-defined test data from profiles.
@@ -239,51 +273,41 @@ These have controlled side effects with automatic cleanup.
 
 **Cleanup is mandatory:** Always run cleanup procedures after Tier 2 tests, even if the test itself failed. Cleanup must be idempotent.
 
-### Step 3: Tier 3 — Approval-Required Live Tests (Human in the Loop)
-
-For each Tier 3 endpoint in the technology profiles, present the user with an approval prompt BEFORE executing. **Never auto-execute Tier 3 tests.**
-
+**On rate limit (429 status):** Classify as `integration_rate_limit`. Include backoff guidance in details. Write to manifest `failures` section. Output `## PIV-Error` block:
 ```
-### Tier 3: Approval-Required Tests
-
-🔔 [Technology Name] - [Operation]
-
-  To validate: [which PRD scenario this tests]
-  Action: [METHOD /endpoint] with [test input description]
-  Cost: [estimated cost from profile]
-  Effect: [what happens - credits consumed, record created, etc.]
-  Cleanup: [auto / manual / none]
-  Last recorded: [date of existing fixture, or "no fixture"]
-
-  → User chose: APPROVE / USE FIXTURE / SKIP
-
-  [If APPROVED]:
-    Response: [actual response]
-    Schema valid: ✅ / ❌
-    Fixture saved: .agents/fixtures/[tech]-[endpoint].json
-    ✅ PASS | ❌ FAIL
-
-  [If FIXTURE]:
-    Loaded: .agents/fixtures/[tech]-[endpoint].json (recorded [date])
-    Agent processed fixture: [result]
-    ✅ PASS (fixture) | ❌ FAIL (fixture)
-
-  [If SKIPPED]:
-    ⏭️ SKIPPED by user
+## PIV-Error
+error_category: integration_rate_limit
+command: validate-implementation
+phase: [N]
+details: "[technology] rate limited on [endpoint] — wait [backoff duration] and retry"
+retry_eligible: true
+retries_remaining: [3 minus existing retry_count]
+checkpoint: [active checkpoint tag or "none"]
 ```
 
-**Approval interaction:**
-- Present ALL Tier 3 tests at once so user can batch approve/skip
-- For each, show: endpoint, cost, effect, and which scenario it validates
-- Accept: approve all, skip all, or individual decisions
-- Record user decisions in validation report
+### Step 3: Tier 3 — Auto-Approved Live Tests
+
+Execute ALL Tier 3 tests automatically. Credentials have been verified by `/preflight` before the autonomous loop began.
+
+```
+### Tier 3: Live Tests (Auto-Approved)
+
+[Technology Name] - [Operation]:
+  Endpoint: [METHOD /endpoint]
+  Validates: [which PRD scenario]
+  Cost: [estimated from profile]
+  Response: [actual response]
+  Schema valid: ✅ / ❌
+  Fixture saved: .agents/fixtures/[tech]-[endpoint].json
+  ✅ PASS | ❌ FAIL
+```
 
 **Response recording:**
-When user approves a live Tier 3 call:
-1. Execute the call and capture full response
-2. Save to `.agents/fixtures/{technology}-{endpoint-name}.json`
+After every Tier 3 call:
+1. Execute the API call
+2. Save full response to `.agents/fixtures/{technology}-{endpoint-name}.json`
 3. Include timestamp, request, and response
-4. On future runs, offer recorded fixture as alternative to fresh call
+4. Fixture serves as historical record and fallback for future runs
 
 ### Step 4: Tier 4 — Mock-Only Tests (Automatic)
 
@@ -329,6 +353,18 @@ Result: ✅ PASS | ❌ FAIL | ⚠️ PARTIAL (some APIs mocked)
 Details: [What happened, which tiers were live vs mocked]
 ```
 
+**On scenario mismatch (FAIL):** Classify as `scenario_mismatch`. Include PRD scenario reference in details. Write to manifest `failures` section. Output `## PIV-Error` block:
+```
+## PIV-Error
+error_category: scenario_mismatch
+command: validate-implementation
+phase: [N]
+details: "Scenario [SC-XXX] failed: expected [PRD expectation], got [actual result]"
+retry_eligible: true
+retries_remaining: [1 minus existing retry_count]
+checkpoint: [active checkpoint tag or "none"]
+```
+
 **Scenario categories:**
 
 **Happy paths** — Test with maximum live integration (Tiers 1-3 where approved):
@@ -359,27 +395,27 @@ Data source: [Live Tier 1-3 response / Fixture / Mock]
 | [Failure] | [Recovery] | [What happened] | [Mock error] | ✅/❌ |
 ```
 
-### Agent Teams Mode (When Available)
+### Agent Teams Mode (Preferred)
 
-> Parallel validation across tiers and scenario categories.
+> Parallel validation across all tiers and scenario categories.
 
 ```
 Team Lead coordinates validation:
-├── Teammate 1: Tier 1-2 integration tests (Steps 1-2, auto)
-├── Teammate 2: Happy path scenarios (Step 5, after Tier 1-2 complete)
-├── Teammate 3: Error recovery + edge cases (Step 5)
-├── Lead: Handles Tier 3 approvals (Step 3 - requires user interaction)
-└── Lead: Decision tree verification + report (Step 6)
+├── Teammate 1: Tier 1-2 integration tests (Steps 1-2)
+├── Teammate 2: Tier 3-4 integration tests (Steps 3-4)
+├── Teammate 3: Happy path scenarios (Step 5)
+├── Teammate 4: Error recovery + edge cases (Step 5)
+└── Lead: Decision tree verification + completeness audit + report (Steps 6-7)
 ```
 
-Tier 3 stays with the Lead because it requires human interaction. All other tiers parallelize across teammates.
+All tiers run in parallel — no human interaction required.
 
 ---
 
-## Phase 4: Full Pipeline (--full flag only)
+## Phase 4: Full Pipeline
 
-**Only run if `--full` flag provided.** This may:
-- Make real API calls (cost money)
+Run the complete end-to-end agent pipeline. This may:
+- Make real API calls (costs are pre-authorized by autonomous mode)
 - Take several minutes
 - Create actual output files
 
@@ -472,11 +508,10 @@ Location: `.agents/validation/{feature-name}-{YYYY-MM-DD}.md`
 |-----------|-----------|--------|---------|---------|
 | [Name] | POST /[endpoint] | ✅ PASS | ✅ CLEANED | [Brief] |
 
-### Tier 3: Approval-Required
-| Technology | Operation | User Decision | Status | Fixture Saved |
-|-----------|-----------|---------------|--------|---------------|
-| [Name] | POST /[endpoint] | APPROVED | ✅ PASS | `.agents/fixtures/[file]` |
-| [Name] | POST /[endpoint] | SKIPPED | ⏭️ SKIP | N/A |
+### Tier 3: Live Tests (Auto-Approved)
+| Technology | Operation | Status | Fixture Saved |
+|-----------|-----------|--------|---------------|
+| [Name] | POST /[endpoint] | ✅ PASS | `.agents/fixtures/[file]` |
 
 ### Tier 4: Mock-Only
 | Technology | Operation | Fixture Used | Agent Behavior | Status |
@@ -488,7 +523,41 @@ Location: `.agents/validation/{feature-name}-{YYYY-MM-DD}.md`
 ## Acceptance Criteria
 
 - [x] [Criterion] - **VERIFIED** (Level/Scenario)
-- [ ] [Criterion] - **MANUAL CHECK NEEDED**
+- [ ] [Criterion] - **NOT VERIFIED**
+
+---
+
+## Completeness Audit (Traceability)
+
+> **Verifies that every user story is fully implemented and validated.** This is the autonomous agent's quality gate — it must pass before reporting a phase as complete.
+
+### Traceability Matrix
+
+| User Story | Scenarios | Plan Tasks | Executed | Validation Result |
+|-----------|-----------|------------|----------|-------------------|
+| US-001 | SC-001, SC-003 | Task 2, 5 | ✅/❌ | Pass/Fail/Not tested |
+| US-002 | SC-002, SC-004 | Task 3, 7, 8 | ✅/❌ | Pass/Fail/Not tested |
+
+**Sources:**
+- User stories + scenario references: PRD Section 5
+- Plan tasks: `.agents/plans/` for this phase
+- Execution status: `.agents/progress/` files
+- Validation results: Phase 3 scenario validation results from this run
+
+### Gaps Identified
+
+- **Untested scenarios**: [list or "none"]
+- **Unexecuted tasks**: [list or "none"]
+- **Orphan scenarios**: [list or "none"] (tested but not linked to any user story — warning only)
+- **Missing coverage**: [list of user stories with zero passing scenarios, or "none"]
+
+### Completeness Verdict
+
+**Verdict**: [COMPLETE | INCOMPLETE]
+**Gaps**: [list of broken links, or "none"]
+
+*If INCOMPLETE: Phase is NOT done — report as `partial` in manifest. Do NOT proceed to `/commit`.*
+*If COMPLETE: Phase is verified done — report as `pass` in manifest. Proceed to `/commit`.*
 
 ---
 
@@ -506,9 +575,10 @@ Location: `.agents/validation/{feature-name}-{YYYY-MM-DD}.md`
 | Decision Trees | [N] | [N] | [N] |
 | Tier 1 (Auto-Live) | [N] | [N] | [N] |
 | Tier 2 (Test Data) | [N] | [N] | [N] |
-| Tier 3 (Approval) | [N] | [N] | [N] |
+| Tier 3 (Live) | [N] | [N] | [N] |
 | Tier 4 (Mock) | [N] | [N] | [N] |
-| Pipeline (if --full) | [N] | [N] | [N] |
+| Pipeline | [N] | [N] | [N] |
+| Completeness | [N] | [N] | [N] |
 
 ---
 
@@ -595,9 +665,9 @@ Self-critique the validation (terminal only):
 - Were failure categories correctly identified?
 - Is the recommended next step accurate given results?
 
-### PIV-Automator-Hooks (If Enabled)
+### PIV-Automator-Hooks
 
-If hooks are enabled, append to the validation report file:
+Append to the validation report file:
 
 ```
 ## PIV-Automator-Hooks
@@ -665,17 +735,11 @@ uv run python -m agent.main --input "..."
 ## Usage
 
 ```bash
-# Standard: Syntax + Components + Scenarios (Levels 1-3)
+# Full validation (all levels, all tiers, completeness audit)
 /validate-implementation
 
-# Standard with specific plan
+# With specific plan
 /validate-implementation .agents/plans/phase-2.md
-
-# Full: Includes end-to-end pipeline (Levels 1-4)
-/validate-implementation --full
-
-# Full with specific plan
-/validate-implementation .agents/plans/phase-2.md --full
 ```
 
 ---
@@ -689,11 +753,12 @@ uv run python -m agent.main --input "..."
 - [ ] Level 2 commands executed (failures noted)
 - [ ] Tier 1 auto-live health checks executed
 - [ ] Tier 2 auto-live tests with test data executed + cleanup run
-- [ ] Tier 3 approval-required tests presented to user (approved/skipped/fixture)
+- [ ] Tier 3 tests auto-executed with results recorded
 - [ ] Tier 4 mock-only tests executed with fixtures
 - [ ] PRD scenario validation complete (happy paths, error recovery, edge cases)
 - [ ] Decision tree verification complete
-- [ ] Level 4 pipeline tested (if --full flag)
+- [ ] Level 4 pipeline tested end-to-end
+- [ ] Completeness audit passed (all user stories have passing scenarios)
 - [ ] Report written with actual pass/fail results per tier
 - [ ] Acceptance criteria verified against scenarios
 - [ ] All PRD scenarios accounted for (tested or documented as untestable)
