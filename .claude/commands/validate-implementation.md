@@ -521,6 +521,23 @@ Location: `.agents/validation/{feature-name}-{YYYY-MM-DD}.md`
 [Based on results - ready for /commit or needs fixes]
 ```
 
+### Manifest Update
+
+After writing the report file, update `.agents/manifest.yaml` (create if needed):
+```yaml
+validations:
+  - path: .agents/validation/[feature-name]-[YYYY-MM-DD].md
+    phase: [N]
+    status: [pass|partial|fail]
+    completed_at: [current ISO 8601 timestamp]
+    scenarios_passed: [N]
+    scenarios_failed: [N]
+    scenarios_skipped: [N]
+phases:
+  [N]: { ..., validation: [pass|partial|fail] }  # update validation status, preserve plan/execution
+```
+Read manifest before writing — merge, don't overwrite. Append to `validations` list (don't replace previous entries). Update `last_updated` timestamp.
+
 ### Terminal Summary
 
 ```

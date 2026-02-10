@@ -1,6 +1,6 @@
 ---
 description: Deep-dive technology research producing structured profiles for all platforms in the PRD
-argument-hint: [prd-file-path]
+argument-hint: [prd-file-path] [--refresh [tech-name]] [--only tech-name]
 ---
 
 # Research Stack: Deep Technology Profiling
@@ -71,6 +71,57 @@ After completing each profile, reflect:
 Check CLAUDE.md for `## PIV Configuration` → `hooks_enabled` setting.
 If arguments contain `--with-hooks`, enable hooks. If `--no-hooks`, disable.
 Strip flags from arguments. Check for `--only [tech]` to research single technology.
+Check for `--refresh [tech-name]` to enter refresh mode (see Refresh Mode section below).
+
+---
+
+## Refresh Mode (`--refresh`)
+
+> **When to use:** Run `/research-stack --refresh` to update stale profiles without full regeneration. Identified by `/prime` when profiles exceed the freshness window (default 7 days).
+
+### Step R1: Identify Stale Profiles
+
+- Read `.agents/manifest.yaml` to find profiles with `freshness: stale`
+- If `--refresh [tech-name]` specifies a technology, refresh only that profile
+- If `--refresh` with no tech name, refresh ALL stale profiles from manifest
+- If no manifest exists, fall back to checking file modification dates against `profile_freshness_window` from CLAUDE.md
+
+### Step R2: Lightweight Profile Update (Per Stale Profile)
+
+For each stale profile:
+1. Read the existing profile file in full
+2. Use WebSearch to find changes since the `generated_at` date:
+   - Search for "[technology] API changes [year]", "[technology] breaking changes", "[technology] changelog"
+3. Update ONLY these sections if changes are found:
+   - **Section 1 (Authentication & Setup)** — auth flow changes
+   - **Section 4 (Rate Limits & Throttling)** — limit changes
+   - **Section 6 (SDK / Library Recommendation)** — new versions
+   - **Section 7 (Integration Gotchas)** — new gotchas
+4. Preserve all other sections unchanged
+5. Update the `**Generated**:` date at the top of the profile
+6. If breaking changes are found that affect testing tiers, flag them in terminal output
+
+### Step R3: Update Manifest
+
+- For each refreshed profile, update the manifest entry:
+  - Set `generated_at` to current timestamp
+  - Set `freshness: fresh`
+- Write updated manifest to `.agents/manifest.yaml`
+
+### Refresh Terminal Output
+
+```
+## Profile Refresh Complete
+
+| Profile | Changes Found | Sections Updated | Breaking Changes |
+|---------|--------------|-----------------|-----------------|
+| [tech]-profile.md | [Yes/No] | [Section numbers or "none"] | [Yes/No - detail] |
+
+**Profiles refreshed**: [N]
+**Manifest updated**: .agents/manifest.yaml
+
+→ Run `/prime` to see updated project status
+```
 
 ---
 
@@ -482,6 +533,24 @@ confidence: [high|medium|low]
 ## Final Output
 
 After generating all profiles:
+
+### Manifest Update
+
+For each profile generated (both full generation and refresh mode), update `.agents/manifest.yaml`:
+- Create `.agents/` directory if it doesn't exist
+- Read existing manifest (or create new one if absent)
+- Add or update entry in `profiles` section:
+  ```yaml
+  profiles:
+    [technology-name]:
+      path: .agents/reference/[technology-name]-profile.md
+      generated_at: [current ISO 8601 timestamp]
+      status: complete
+      freshness: fresh
+      used_in_phases: [list of phase numbers that reference this technology, from PRD]
+  ```
+- Preserve all existing manifest entries — merge, don't overwrite
+- Update `last_updated` timestamp
 
 ### Summary Report (Terminal Output)
 

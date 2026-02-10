@@ -401,6 +401,19 @@ After creating the PRD:
 3. List any assumptions made
 4. Suggest which phase to start with
 5. **Remind user**: Run `/research-stack` before `/plan-feature` to generate technology profiles
+6. **Update manifest**: Read `.agents/manifest.yaml` (create `.agents/` directory and manifest if they don't exist). Write PRD entry and initialize all phases:
+   ```yaml
+   prd:
+     path: [PRD file path]
+     status: complete
+     generated_at: [current ISO 8601 timestamp]
+     phases_defined: [list of phase numbers from the PRD]
+   phases:
+     1: { plan: not_started, execution: not_started, validation: not_run }
+     2: { plan: not_started, execution: not_started, validation: not_run }
+     # ... one entry per phase defined in the PRD
+   ```
+   Preserve existing manifest entries — merge, don't overwrite. Update `last_updated` timestamp.
 
 ### Reasoning
 

@@ -760,6 +760,17 @@ After creating the Plan, provide:
 - **Agent Behavior**: [Yes/No - does this implement agent decision trees?]
 - **Confidence**: X/10 for one-pass success
 - **Next Step**: → Run `/execute .agents/plans/{plan-file}.md` to begin implementation
+- **Manifest update**: Update `.agents/manifest.yaml` — add plan entry and update phase status:
+  ```yaml
+  plans:
+    - path: .agents/plans/[plan-file].md
+      phase: [N]
+      status: complete
+      generated_at: [current ISO 8601 timestamp]
+  phases:
+    [N]: { plan: complete, ... }  # update plan status only, preserve execution/validation
+  ```
+  Read manifest before writing — merge, don't overwrite. Update `last_updated` timestamp.
 
 ### Reasoning
 

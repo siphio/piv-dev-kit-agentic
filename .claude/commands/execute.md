@@ -147,6 +147,19 @@ Execute tasks serially when Agent Teams unavailable:
 - Leave unvalidated tasks in "review" for manual verification
 - Record completion timestamps and validation results
 - Record any remediation actions needed
+- **Update manifest**: Read `.agents/manifest.yaml` (create if needed). Add execution entry and update phase status:
+  ```yaml
+  executions:
+    - phase: [N]
+      status: [complete|partial|failed]
+      completed_at: [current ISO 8601 timestamp]
+      tasks_total: [total task count]
+      tasks_done: [completed count]
+      tasks_blocked: [blocked count]
+  phases:
+    [N]: { ..., execution: [complete|in_progress], ... }  # update execution status, preserve plan/validation
+  ```
+  Read manifest before writing — merge, don't overwrite. Append to `executions` list (don't replace previous entries). Update `last_updated` timestamp.
 
 ## Step 10: Final Report
 

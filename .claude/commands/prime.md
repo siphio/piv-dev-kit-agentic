@@ -35,9 +35,61 @@ Before producing the output report, think step by step:
 
 Check CLAUDE.md for `## PIV Configuration` → `hooks_enabled` setting.
 If arguments contain `--with-hooks`, enable hooks. If `--no-hooks`, disable.
-Strip hook flags from arguments before processing reference file keywords.
+If arguments contain `--no-manifest`, skip all manifest operations (legacy fallback).
+Strip all flags from arguments before processing reference file keywords.
 
 ## Process
+
+### 0. Load or Build Manifest
+
+> Skip this step and all manifest operations if `--no-manifest` flag is present.
+
+**If `.agents/manifest.yaml` exists:**
+- Read the manifest file into memory
+
+**If `.agents/manifest.yaml` does not exist (first run):**
+- Scan the filesystem to discover existing artifacts:
+  - PRD: Check `PRD.md`, `.agents/PRD.md`
+  - Profiles: Check `.agents/reference/*-profile.md`
+  - Plans: Check `.agents/plans/*.md`
+  - Progress: Check `.agents/progress/*-progress.md`
+  - Validations: Check `.agents/validation/*.md`
+- Build a manifest from discovered artifacts with inferred metadata:
+  - `generated_at`: Use file modification date
+  - `status`: Infer from file existence (`complete` if file exists)
+  - Phase statuses: Infer from which plans/validations exist
+- Create `.agents/` directory if it doesn't exist
+- Write the new manifest to `.agents/manifest.yaml`
+
+### 0b. Reconcile Manifest
+
+Run every time (even on existing manifests):
+
+1. **Compare manifest entries against actual files on disk:**
+   - Files listed in manifest but missing from disk → set `status: missing`, output warning
+   - Files on disk (PRD, profiles, plans, validations) not in manifest → add with inferred metadata, output warning
+
+2. **Recalculate profile freshness:**
+   - Read `profile_freshness_window` from CLAUDE.md PIV Configuration (default: 7d)
+   - For each profile entry: if `generated_at` + freshness window < today → set `freshness: stale`
+   - Otherwise → set `freshness: fresh`
+
+3. **Update phase status consistency:**
+   - Cross-reference plan files, progress files, and validation files against phase entries
+   - Ensure phase statuses reflect actual artifact state
+
+4. **Write reconciled manifest back to `.agents/manifest.yaml`**
+5. **Update `last_updated` timestamp** (ISO 8601)
+
+### 0c. Coverage Gap Detection
+
+1. Identify the next unfinished phase from manifest (first phase where `plan` is `not_started` or `execution` is `not_started`)
+2. Read the PRD phase section for that phase to extract technologies referenced
+3. Cross-reference those technologies against existing profile entries in manifest
+4. Flag:
+   - **Missing profiles**: Technology referenced in phase but no profile exists
+   - **Stale profiles**: Profile exists but `freshness: stale`
+5. Store coverage gaps for use in the output report and next-action recommendation
 
 ### 1. Analyze Project Structure
 
@@ -94,6 +146,13 @@ Check current branch and status:
 
 ### 6. Check Development Progress
 
+**If manifest is available** (not `--no-manifest`):
+- Report phase statuses from manifest (`phases` section): plan, execution, validation status per phase
+- Report profile freshness counts: N fresh, N stale, N missing
+- Report coverage gaps from Step 0c: missing or stale profiles for the next unfinished phase
+- Report last manifest update timestamp
+
+**Fallback** (if `--no-manifest` or manifest unavailable):
 If `.agents/plans/` exists:
 ```bash
 ls -t .agents/plans/*.md 2>/dev/null
@@ -149,8 +208,35 @@ Provide a concise summary covering:
 - Recent changes or development focus
 - Any immediate observations or concerns
 
+### Manifest Status (If Manifest Available)
+
+Report:
+- Manifest location: `.agents/manifest.yaml`
+- Last updated: [timestamp]
+- Reconciliation results: [N files matched, N warnings]
+- Profile freshness: [N fresh, N stale, N missing]
+- Coverage gaps: [list or "none"]
+
 ### Recommended Next Step
-Based on the project state, suggest the next PIV command:
+
+**If manifest is available**, use manifest-driven priority logic (highest priority first):
+1. Stale or missing profiles needed for next phase? → "Run `/research-stack --refresh` to update stale profiles" or "Run `/research-stack` to generate missing profiles"
+2. No PRD? → "Run `/create-prd` to define requirements"
+3. Next phase has no plan? → "Run `/plan-feature \"Phase N: Name\"` to start planning"
+4. Plan exists, not executed? → "Run `/execute .agents/plans/[plan].md`"
+5. Executed, not validated? → "Run `/validate-implementation`"
+6. Validated? → "Run `/commit` to ship"
+
+Write the recommendation to the manifest `next_action` block:
+```yaml
+next_action:
+  command: [command name]
+  argument: "[argument string]"
+  reason: "[why this is the recommended next step]"
+  confidence: [high|medium|low]
+```
+
+**Fallback** (if `--no-manifest`): Use the static if/else chain:
 - No PRD? → "Run `/create-prd` to define requirements"
 - PRD exists, no profiles? → "Run `/research-stack` to research technologies"
 - Profiles exist, no plans? → "Run `/plan-feature \"Phase 1\"` to start planning"

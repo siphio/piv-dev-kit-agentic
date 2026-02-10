@@ -224,8 +224,11 @@ Create a `CLAUDE.md` file (or similar global rules file) following this structur
       ```markdown
       ## PIV Configuration
       - hooks_enabled: false
+      - profile_freshness_window: 7d
       ```
-    - Set to `true` if the project plans to use SDK automation or wants hook metadata
+    - Set hooks to `true` if the project plans to use SDK automation or wants hook metadata
+    - `profile_freshness_window` controls when `/prime` flags profiles as stale (default 7 days)
+    - Add a manifest paragraph: "The framework tracks project state in `.agents/manifest.yaml`. All PIV commands read and write to this file — phase progress, profile freshness, coverage gaps, and next-action recommendations. `/prime` builds and reconciles the manifest; other commands update it after producing artifacts."
 
 16. **Prompting & Reasoning Guidelines** (for projects using PIV loop)
     - Add the CoT styles table (zero-shot, few-shot, ToT, per-subtask)
@@ -233,6 +236,43 @@ Create a `CLAUDE.md` file (or similar global rules file) following this structur
     - Add the Reflection pattern description (terminal only, ✅/⚠️ format)
     - Add the Hook Block Format specification (key-value, regex-parseable)
     - Reference CLAUDE.md in piv-dev-kit for the canonical version of these guidelines
+
+17. **Manifest Reference** (for projects using PIV loop)
+    - Document what `.agents/manifest.yaml` tracks and its purpose:
+      ```markdown
+      ## Manifest Reference
+
+      The manifest (`.agents/manifest.yaml`) provides deterministic state tracking for the PIV loop.
+      `/prime` builds and reconciles it; all other PIV commands update it after producing artifacts.
+
+      **What it tracks:**
+      - **Phase progress**: plan, execution, and validation status per phase
+      - **PRD metadata**: path, generation date, phases defined
+      - **Profile freshness**: generation date and stale/fresh status per technology profile
+      - **Plans and executions**: paths, phases, completion status
+      - **Validation results**: scenarios passed/failed/skipped per validation run
+      - **Next action**: recommended command, argument, reason, and confidence
+      - **Coverage gaps**: missing or stale profiles for the next unfinished phase
+
+      **Which commands write what:**
+      | Command | Manifest Section Updated |
+      |---------|--------------------------|
+      | `/prime` | Builds/reconciles full manifest, writes `next_action` |
+      | `/create-prd` | Writes `prd` entry, initializes `phases` |
+      | `/research-stack` | Writes `profiles` entries |
+      | `/plan-feature` | Appends to `plans`, updates `phases.[N].plan` |
+      | `/execute` | Appends to `executions`, updates `phases.[N].execution` |
+      | `/validate-implementation` | Appends to `validations`, updates `phases.[N].validation` |
+
+      **Conventions:**
+      - Always read manifest before writing — merge, never overwrite
+      - Timestamps use ISO 8601 format
+      - Profile freshness: `stale` if `generated_at` + `profile_freshness_window` < today
+      - Phase status values: `not_started`, `in_progress`, `complete` (plan/execution); `not_run`, `pass`, `partial`, `fail` (validation)
+
+      **Refresh workflow:**
+      When `/prime` flags stale profiles → run `/research-stack --refresh` → profiles updated with fresh timestamps → `/prime` reports clean status on next run.
+      ```
 
 ## Process to Follow:
 

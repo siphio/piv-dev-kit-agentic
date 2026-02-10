@@ -194,9 +194,13 @@ Settings that control PIV command behavior across all commands.
 | Setting | Default | Description |
 |---------|---------|-------------|
 | hooks_enabled | false | Append `## PIV-Automator-Hooks` to file artifacts |
+| profile_freshness_window | 7d | Profiles older than this are flagged as stale by `/prime` |
 
 **Current Settings:**
 - hooks_enabled: false
+- profile_freshness_window: 7d
+
+**Manifest**: The framework tracks project state in `.agents/manifest.yaml`. All PIV commands read and write to this file — phase progress, profile freshness, coverage gaps, and next-action recommendations. `/prime` builds and reconciles the manifest; other commands update it after producing artifacts. See the manifest structure in the spec for field definitions.
 
 **Override per command:** Add `--with-hooks` or `--no-hooks` to any command invocation to override the project default for that run.
 
@@ -270,6 +274,8 @@ Rules:
 Commands that accept flags parse them from `$ARGUMENTS`:
 - Strip `--with-hooks` and `--no-hooks` from arguments before processing
 - Strip `--reflect` where applicable — currently supported only by `/plan-feature`; other commands ignore it
+- Strip `--no-manifest` where applicable — supported by `/prime` for legacy fallback without manifest
+- Strip `--refresh [tech-name]` where applicable — supported by `/research-stack` for stale profile updates
 - Remaining text is the actual argument (filename, phase name, etc.)
 
 ### Manual Mode Preservation
