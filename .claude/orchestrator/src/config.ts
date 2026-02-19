@@ -44,7 +44,9 @@ export function loadConfig(): OrchestratorConfig {
     console.log("⚠️ Both TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID required — Telegram disabled");
   }
 
-  return { projectDir, model, hasOAuthToken, telegram, mode };
+  const registryEnabled = process.env.PIV_REGISTRY_DISABLED !== "1";
+
+  return { projectDir, model, hasOAuthToken, telegram, mode, registryEnabled };
 }
 
 export function getSessionDefaults(command: PivCommand): { maxTurns: number; maxBudgetUsd: number } {

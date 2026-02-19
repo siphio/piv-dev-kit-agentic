@@ -6,13 +6,16 @@ import { readManifest, writeManifest, appendFailure } from "./manifest-manager.j
 import { determineNextAction, findActiveCheckpoint, findPendingFailure } from "./state-machine.js";
 import { checkForRunningInstance, writePidFile, removePidFile } from "./process-manager.js";
 import { hasUncommittedChanges } from "./git-manager.js";
+import { registerInstance, deregisterInstance, claimBotOwnership } from "./instance-registry.js";
+import { startSignalWatcher, stopSignalWatcher, clearSignal } from "./signal-handler.js";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import { Bot } from "grammy";
 import { TelegramNotifier } from "./telegram-notifier.js";
 import { PrdRelay } from "./prd-relay.js";
 import { createBot, registerBotCommands } from "./telegram-bot.js";
 import type { OrchestratorControls } from "./telegram-bot.js";
+import type { SignalMessage } from "./types.js";
 
 interface CliArgs {
   projectDir?: string;
@@ -57,6 +60,7 @@ async function main(): Promise<void> {
   // Load and validate config
   const config = loadConfig();
   const projectDir = cliArgs.projectDir ?? config.projectDir;
+  const projectPrefix = config.telegram?.projectPrefix ?? basename(projectDir);
 
   console.log(`📁 Project: ${projectDir}`);
   console.log(`🔑 Auth: OAuth (subscription via CLAUDE_CODE_OAUTH_TOKEN)`);
@@ -96,6 +100,26 @@ async function main(): Promise<void> {
   writePidFile(projectDir);
   console.log(`🔒 PID file written (PID: ${process.pid})`);
 
+  // --- Instance Registry: Register & Claim Bot Ownership ---
+  let isBotOwner = false;
+  let signalWatcherTimer: NodeJS.Timeout | undefined;
+
+  if (config.registryEnabled && config.telegram) {
+    isBotOwner = claimBotOwnership(projectDir);
+    registerInstance({
+      prefix: projectPrefix,
+      projectDir,
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      manifestPath,
+      isBotOwner,
+    });
+    console.log(`📋 Registry: registered (bot owner: ${isBotOwner ? "yes" : "no"})`);
+  }
+
+  // Clear any leftover signal file from previous run
+  clearSignal(projectDir);
+
   // --- Startup Recovery: Check git state ---
   let isRestart = false;
   try {
@@ -117,7 +141,6 @@ async function main(): Promise<void> {
 
   // --- Telegram Setup (optional) ---
   let notifier: TelegramNotifier | undefined;
-  let bot: Bot | undefined;
   let prdRelay: PrdRelay | undefined;
   const state = { running: false, paused: false };
   let pauseCheck: (() => Promise<void>) | undefined;
@@ -126,47 +149,84 @@ async function main(): Promise<void> {
   if (config.telegram) {
     console.log(`\n📱 Telegram: enabled (chat: ${config.telegram.chatId}, prefix: ${config.telegram.projectPrefix})`);
 
-    bot = new Bot(config.telegram.botToken);
-    notifier = new TelegramNotifier(bot, config.telegram.chatId, config.telegram.projectPrefix);
-    prdRelay = new PrdRelay(projectDir, notifier);
-    pauseCheck = createPauseCheck(state);
+    if (isBotOwner) {
+      // Bot owner: create bot, start polling, full functionality
+      const bot = new Bot(config.telegram.botToken);
+      notifier = new TelegramNotifier(bot, config.telegram.chatId, config.telegram.projectPrefix);
+      prdRelay = new PrdRelay(projectDir, notifier);
+      pauseCheck = createPauseCheck(state);
 
-    const controls: OrchestratorControls = {
-      getManifest: () => readManifest(projectDir),
-      startExecution: () => {
-        if (state.running) return;
-        state.running = true;
-        state.paused = false;
-        // Trigger execution asynchronously — don't block the bot handler
-        runAllPhases(projectDir, notifier, pauseCheck).finally(() => {
-          state.running = false;
-        });
-      },
-      pause: () => { state.paused = true; },
-      resume: () => { state.paused = false; },
-      isRunning: () => state.running,
-      isPaused: () => state.paused,
-      startPrdRelay: (_chatId: number) => {
-        prdRelay!.startConversation().catch((err) => {
-          console.log(`  ⚠️ PRD relay start failed: ${err instanceof Error ? err.message : String(err)}`);
-        });
-      },
-      isPrdRelayActive: () => prdRelay!.isActive(),
-      handlePrdMessage: (text: string) => prdRelay!.handleUserMessage(text),
-      endPrdRelay: () => prdRelay!.endConversation(),
-      projectDir,
-    };
+      const controls: OrchestratorControls = {
+        getManifest: () => readManifest(projectDir),
+        startExecution: () => {
+          if (state.running) return;
+          state.running = true;
+          state.paused = false;
+          runAllPhases(projectDir, notifier, pauseCheck).finally(() => {
+            state.running = false;
+          });
+        },
+        pause: () => { state.paused = true; },
+        resume: () => { state.paused = false; },
+        isRunning: () => state.running,
+        isPaused: () => state.paused,
+        startPrdRelay: (_chatId: number) => {
+          prdRelay!.startConversation().catch((err) => {
+            console.log(`  ⚠️ PRD relay start failed: ${err instanceof Error ? err.message : String(err)}`);
+          });
+        },
+        isPrdRelayActive: () => prdRelay!.isActive(),
+        handlePrdMessage: (text: string) => prdRelay!.handleUserMessage(text),
+        endPrdRelay: () => prdRelay!.endConversation(),
+        projectDir,
+        registryEnabled: config.registryEnabled,
+        projectPrefix,
+      };
 
-    telegramBot = createBot(config.telegram, controls, notifier);
+      telegramBot = createBot(config.telegram, controls, notifier);
+      await registerBotCommands(telegramBot);
+      telegramBot.start();
+      console.log("  🤖 Telegram bot polling started (bot owner)");
+    } else {
+      // Non-bot-owner: notification-only mode (no polling)
+      notifier = TelegramNotifier.createNotificationOnly(
+        config.telegram.botToken,
+        config.telegram.chatId,
+        config.telegram.projectPrefix
+      );
+      pauseCheck = createPauseCheck(state);
+      console.log("  📨 Telegram notification-only mode (another instance owns polling)");
 
-    // Register commands and start polling (non-blocking)
-    await registerBotCommands(telegramBot);
-    telegramBot.start();
-    console.log("  🤖 Telegram bot polling started");
+      // Start signal watcher for receiving commands from bot owner
+      const handleSignal = (signal: SignalMessage) => {
+        console.log(`  📩 Signal received: ${signal.action} from [${signal.from}]`);
+        switch (signal.action) {
+          case "go":
+            if (!state.running) {
+              state.running = true;
+              state.paused = false;
+              runAllPhases(projectDir, notifier, pauseCheck).finally(() => {
+                state.running = false;
+              });
+            }
+            break;
+          case "pause":
+            state.paused = true;
+            break;
+          case "resume":
+            state.paused = false;
+            break;
+          case "shutdown":
+            shutdown();
+            break;
+        }
+      };
+      signalWatcherTimer = startSignalWatcher(projectDir, handleSignal);
+    }
 
     // Notify Telegram of restart if recovering
     if (isRestart) {
-      await notifier.sendText("⚠️ Uncommitted changes detected on restart" );
+      await notifier.sendText("⚠️ Uncommitted changes detected on restart");
     }
   }
 
@@ -177,6 +237,16 @@ async function main(): Promise<void> {
       removePidFile(projectDir);
     } catch {
       // Don't fail shutdown on PID removal error
+    }
+    if (config.registryEnabled) {
+      try {
+        deregisterInstance(projectDir);
+      } catch {
+        // Best effort registry cleanup
+      }
+    }
+    if (signalWatcherTimer) {
+      stopSignalWatcher(signalWatcherTimer);
     }
     telegramBot?.stop();
     process.exit(0);
@@ -191,6 +261,13 @@ async function main(): Promise<void> {
       removePidFile(projectDir);
     } catch {
       // Best effort PID cleanup
+    }
+    if (config.registryEnabled) {
+      try {
+        deregisterInstance(projectDir);
+      } catch {
+        // Best effort registry cleanup
+      }
     }
     try {
       const currentManifest = await readManifest(projectDir);

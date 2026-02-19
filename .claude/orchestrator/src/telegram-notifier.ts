@@ -160,6 +160,16 @@ export class TelegramNotifier {
     await this.sendText(formatApprovalResultMessage(techName, action));
   }
 
+  /**
+   * Create a notification-only TelegramNotifier that can send messages
+   * without owning the polling connection. Uses a standalone Bot instance
+   * purely for its API — never calls bot.start().
+   */
+  static createNotificationOnly(botToken: string, chatId: number, prefix: string): TelegramNotifier {
+    const bot = new Bot(botToken);
+    return new TelegramNotifier(bot, chatId, prefix);
+  }
+
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }

@@ -312,6 +312,27 @@ describe("determineNextAction", () => {
     expect(action.reason).toContain("manifest_corruption");
   });
 
+  it("recommends done when all 4 phases are complete", () => {
+    const manifest: Manifest = {
+      ...baseManifest(),
+      prd: {
+        path: ".agents/PRD.md",
+        status: "validated",
+        generated_at: "2026-02-18",
+        phases_defined: [1, 2, 3, 4],
+      },
+      phases: {
+        1: { plan: "complete", execution: "complete", validation: "pass" },
+        2: { plan: "complete", execution: "complete", validation: "pass" },
+        3: { plan: "complete", execution: "complete", validation: "pass" },
+        4: { plan: "complete", execution: "complete", validation: "pass" },
+      },
+    };
+    const action = determineNextAction(manifest);
+    expect(action.command).toBe("done");
+    expect(action.reason).toContain("All phases complete");
+  });
+
   it("resumes execution with plan path when active checkpoint has matching plan", () => {
     const manifest: Manifest = {
       ...baseManifest(),

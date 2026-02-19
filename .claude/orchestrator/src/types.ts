@@ -212,6 +212,32 @@ export interface ApprovalResult {
 
 export type OrchestratorMode = "cli" | "telegram";
 
+// --- Instance Registry Types ---
+
+export interface RegistryInstance {
+  prefix: string;
+  projectDir: string;
+  pid: number;
+  startedAt: string;
+  manifestPath: string;
+  isBotOwner: boolean;
+}
+
+export interface InstanceRegistry {
+  instances: RegistryInstance[];
+  lastUpdated: string;
+}
+
+// --- Signal Types ---
+
+export type SignalAction = "go" | "pause" | "resume" | "shutdown";
+
+export interface SignalMessage {
+  action: SignalAction;
+  timestamp: string;
+  from: string; // prefix of the sender (bot owner)
+}
+
 // --- Process Management Types ---
 
 export interface ProcessInfo {
@@ -228,4 +254,5 @@ export interface OrchestratorConfig {
   hasOAuthToken: boolean;
   telegram?: TelegramConfig;
   mode: OrchestratorMode;
+  registryEnabled: boolean;
 }

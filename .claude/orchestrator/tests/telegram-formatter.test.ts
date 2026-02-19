@@ -4,6 +4,7 @@ import {
   tagMessage,
   splitMessage,
   formatStatusMessage,
+  formatMultiStatusMessage,
   formatPhaseStartMessage,
   formatPhaseCompleteMessage,
   formatEscalationMessage,
@@ -212,6 +213,67 @@ describe("formatApprovalMessage", () => {
     expect(result).toContain("$0.50 per call");
     expect(result).toContain("Creates test charge");
     expect(result).toContain("Refund within 24h");
+  });
+});
+
+describe("formatMultiStatusMessage", () => {
+  it("formats HTML with multiple project entries", () => {
+    const instances = [
+      {
+        prefix: "proj-a",
+        pid: 1234,
+        manifest: createTestManifest({
+          phases: {
+            1: { plan: "complete", execution: "complete", validation: "pass" },
+            2: { plan: "complete", execution: "not_started", validation: "not_run" },
+          },
+          next_action: { command: "execute", argument: "plan.md", reason: "Ready", confidence: "high" as const },
+        }),
+      },
+      {
+        prefix: "proj-b",
+        pid: 5678,
+        manifest: createTestManifest({
+          phases: {
+            1: { plan: "complete", execution: "complete", validation: "pass" },
+            2: { plan: "complete", execution: "complete", validation: "pass" },
+          },
+          next_action: { command: "done", reason: "All complete", confidence: "high" as const },
+        }),
+      },
+    ];
+
+    const result = formatMultiStatusMessage(instances);
+    expect(result).toContain("<b>PIV Orchestrator — All Instances</b>");
+    expect(result).toContain("[proj-a]");
+    expect(result).toContain("[proj-b]");
+    expect(result).toContain("PID 1234");
+    expect(result).toContain("PID 5678");
+    expect(result).toContain("1/2 phases");
+    expect(result).toContain("2/2 phases");
+  });
+
+  it("handles null manifest (instance running but manifest unreadable)", () => {
+    const instances = [
+      { prefix: "broken", pid: 9999, manifest: null },
+    ];
+    const result = formatMultiStatusMessage(instances);
+    expect(result).toContain("[broken]");
+    expect(result).toContain("manifest unavailable");
+  });
+
+  it("escapes HTML in project prefixes", () => {
+    const instances = [
+      { prefix: "<script>xss</script>", pid: 1, manifest: null },
+    ];
+    const result = formatMultiStatusMessage(instances);
+    expect(result).not.toContain("<script>");
+    expect(result).toContain("&lt;script&gt;");
+  });
+
+  it("shows empty message when no instances", () => {
+    const result = formatMultiStatusMessage([]);
+    expect(result).toContain("No active instances found");
   });
 });
 

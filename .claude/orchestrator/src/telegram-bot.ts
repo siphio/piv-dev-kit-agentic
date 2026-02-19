@@ -4,7 +4,10 @@ import { Bot } from "grammy";
 import { autoRetry } from "@grammyjs/auto-retry";
 import type { TelegramConfig, Manifest } from "./types.js";
 import type { TelegramNotifier } from "./telegram-notifier.js";
-import { formatStatusMessage, tagMessage, escapeHtml } from "./telegram-formatter.js";
+import { formatStatusMessage, formatMultiStatusMessage, tagMessage, escapeHtml } from "./telegram-formatter.js";
+import { listActiveInstances } from "./instance-registry.js";
+import { readManifest } from "./manifest-manager.js";
+import { writeSignal } from "./signal-handler.js";
 
 /**
  * Interface for orchestrator control functions exposed to the bot.
@@ -21,13 +24,15 @@ export interface OrchestratorControls {
   handlePrdMessage: (text: string) => Promise<string>;
   endPrdRelay: () => Promise<void>;
   projectDir: string;
+  registryEnabled: boolean;
+  projectPrefix: string;
 }
 
 const BOT_COMMANDS = [
-  { command: "go", description: "Start autonomous execution from current phase" },
-  { command: "pause", description: "Pause autonomous execution after current step" },
-  { command: "resume", description: "Resume paused autonomous execution" },
-  { command: "status", description: "Show current phase, progress, and next action" },
+  { command: "go", description: "Start execution (or /go <prefix> for specific project)" },
+  { command: "pause", description: "Pause execution (or /pause <prefix> for specific project)" },
+  { command: "resume", description: "Resume execution (or /resume <prefix> for specific project)" },
+  { command: "status", description: "Status (or /status all for all projects)" },
   { command: "create_prd", description: "Start PRD creation conversation" },
   { command: "end_prd", description: "End active PRD creation session" },
   { command: "preflight", description: "Show credential and environment check status" },
@@ -61,16 +66,74 @@ export function createBot(
   // --- Command Handlers ---
 
   bot.command("status", async (ctx) => {
+    const arg = ctx.match?.trim();
+
     try {
-      const manifest = await controls.getManifest();
-      const message = tagMessage(config.projectPrefix, formatStatusMessage(manifest));
-      await ctx.reply(message, { parse_mode: "HTML" });
+      if (arg === "all" && controls.registryEnabled) {
+        // Multi-project status
+        const instances = listActiveInstances();
+        const instanceData = await Promise.all(
+          instances.map(async (inst) => {
+            let manifest: Manifest | null = null;
+            try {
+              manifest = await readManifest(inst.projectDir);
+            } catch {
+              // Manifest unreadable — will show as unavailable
+            }
+            return { prefix: inst.prefix, manifest, pid: inst.pid };
+          })
+        );
+        const message = formatMultiStatusMessage(instanceData);
+        await ctx.reply(message, { parse_mode: "HTML" });
+      } else if (arg && controls.registryEnabled) {
+        // Specific project status by prefix
+        const instances = listActiveInstances();
+        const target = instances.find((i) => i.prefix === arg);
+        if (!target) {
+          await ctx.reply(`⚠️ No active instance with prefix "${escapeHtml(arg)}".`);
+          return;
+        }
+        try {
+          const manifest = await readManifest(target.projectDir);
+          const message = tagMessage(target.prefix, formatStatusMessage(manifest));
+          await ctx.reply(message, { parse_mode: "HTML" });
+        } catch (err) {
+          await ctx.reply(`⚠️ Could not read status for ${escapeHtml(arg)}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      } else {
+        // Current project status (existing behavior)
+        const manifest = await controls.getManifest();
+        const message = tagMessage(config.projectPrefix, formatStatusMessage(manifest));
+        await ctx.reply(message, { parse_mode: "HTML" });
+      }
     } catch (err) {
       await ctx.reply(`⚠️ Could not read status: ${err instanceof Error ? err.message : String(err)}`);
     }
   });
 
   bot.command("go", async (ctx) => {
+    const arg = ctx.match?.trim();
+
+    // Route to another instance via signal file
+    if (arg && controls.registryEnabled) {
+      const instances = listActiveInstances();
+      const target = instances.find((i) => i.prefix === arg);
+      if (!target) {
+        await ctx.reply(`⚠️ No active instance with prefix "${escapeHtml(arg)}".`);
+        return;
+      }
+      if (target.projectDir !== controls.projectDir) {
+        writeSignal(target.projectDir, {
+          action: "go",
+          timestamp: new Date().toISOString(),
+          from: controls.projectPrefix,
+        });
+        await ctx.reply(tagMessage(config.projectPrefix, `🚀 Sent /go signal to [${escapeHtml(arg)}]`));
+        return;
+      }
+    }
+
+    // Start local execution
     if (controls.isRunning()) {
       await ctx.reply(tagMessage(config.projectPrefix, "⚠️ Execution already in progress."));
       return;
@@ -80,6 +143,27 @@ export function createBot(
   });
 
   bot.command("pause", async (ctx) => {
+    const arg = ctx.match?.trim();
+
+    // Route to another instance
+    if (arg && controls.registryEnabled) {
+      const instances = listActiveInstances();
+      const target = instances.find((i) => i.prefix === arg);
+      if (!target) {
+        await ctx.reply(`⚠️ No active instance with prefix "${escapeHtml(arg)}".`);
+        return;
+      }
+      if (target.projectDir !== controls.projectDir) {
+        writeSignal(target.projectDir, {
+          action: "pause",
+          timestamp: new Date().toISOString(),
+          from: controls.projectPrefix,
+        });
+        await ctx.reply(tagMessage(config.projectPrefix, `⏸ Sent /pause signal to [${escapeHtml(arg)}]`));
+        return;
+      }
+    }
+
     if (!controls.isRunning()) {
       await ctx.reply(tagMessage(config.projectPrefix, "⚠️ Nothing is running to pause."));
       return;
@@ -93,6 +177,27 @@ export function createBot(
   });
 
   bot.command("resume", async (ctx) => {
+    const arg = ctx.match?.trim();
+
+    // Route to another instance
+    if (arg && controls.registryEnabled) {
+      const instances = listActiveInstances();
+      const target = instances.find((i) => i.prefix === arg);
+      if (!target) {
+        await ctx.reply(`⚠️ No active instance with prefix "${escapeHtml(arg)}".`);
+        return;
+      }
+      if (target.projectDir !== controls.projectDir) {
+        writeSignal(target.projectDir, {
+          action: "resume",
+          timestamp: new Date().toISOString(),
+          from: controls.projectPrefix,
+        });
+        await ctx.reply(tagMessage(config.projectPrefix, `▶️ Sent /resume signal to [${escapeHtml(arg)}]`));
+        return;
+      }
+    }
+
     if (!controls.isPaused()) {
       await ctx.reply(tagMessage(config.projectPrefix, "⚠️ Not currently paused."));
       return;

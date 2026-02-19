@@ -285,6 +285,17 @@ export async function runAllPhases(
 
   console.log(`\n🚀 Starting autonomous execution — ${phases.length} phases\n`);
 
+  // Heartbeat: send periodic "still running" message to Telegram (every 30 min)
+  const heartbeatInterval = notifier ? setInterval(async () => {
+    try {
+      const m = await readManifest(projectDir);
+      const phase = getNextUnfinishedPhase(m);
+      await notifier.sendText(`💓 Still running — Phase ${phase ?? "?"} in progress`);
+    } catch {
+      // Heartbeat is best-effort — don't crash on failure
+    }
+  }, 30 * 60 * 1000) : null;
+
   let totalCost = 0;
 
   for (const phase of phases) {
@@ -314,9 +325,13 @@ export async function runAllPhases(
     const failure = findPendingFailure(manifest);
     if (failure) {
       console.log(`\n🛑 Stopping — pending failure in phase ${failure.phase}: ${failure.details}`);
+      if (heartbeatInterval) clearInterval(heartbeatInterval);
       break;
     }
   }
+
+  // Clear heartbeat timer
+  if (heartbeatInterval) clearInterval(heartbeatInterval);
 
   // Final summary
   manifest = await readManifest(projectDir);

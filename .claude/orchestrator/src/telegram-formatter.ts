@@ -1,6 +1,6 @@
 // PIV Orchestrator — Telegram Message Formatting Utilities
 
-import type { Manifest, ApprovalRequest } from "./types.js";
+import type { Manifest, ApprovalRequest, RegistryInstance } from "./types.js";
 
 const MAX_MESSAGE_LENGTH = 4000; // Leave room for HTML tags (Telegram limit is 4096)
 
@@ -152,6 +152,52 @@ export function formatApprovalMessage(request: ApprovalRequest): string {
   lines.push(`  Cleanup: ${escapeHtml(request.cleanup)}`);
   lines.push("");
   lines.push("Choose an option:");
+  return lines.join("\n");
+}
+
+/**
+ * Format multi-project status message for /status all (SC-010).
+ * Shows each running instance with its current phase and status.
+ */
+export function formatMultiStatusMessage(
+  instances: Array<{ prefix: string; manifest: Manifest | null; pid: number }>
+): string {
+  const lines: string[] = [];
+
+  lines.push("<b>PIV Orchestrator — All Instances</b>");
+  lines.push("");
+
+  if (instances.length === 0) {
+    lines.push("<i>No active instances found.</i>");
+    return lines.join("\n");
+  }
+
+  for (const inst of instances) {
+    const prefix = escapeHtml(inst.prefix);
+    if (!inst.manifest) {
+      lines.push(`<b>[${prefix}]</b> PID ${inst.pid} — <i>manifest unavailable</i>`);
+      continue;
+    }
+
+    const phaseNumbers = Object.keys(inst.manifest.phases)
+      .map(Number)
+      .sort((a, b) => a - b);
+
+    const completedCount = phaseNumbers.filter((p) => {
+      const s = inst.manifest!.phases[p];
+      return s.plan === "complete" && s.execution === "complete" && s.validation === "pass";
+    }).length;
+
+    const nextAction = inst.manifest.next_action;
+    const nextInfo = nextAction
+      ? `→ ${escapeHtml(nextAction.command)}${nextAction.argument ? " " + escapeHtml(nextAction.argument) : ""}`
+      : "→ idle";
+
+    lines.push(
+      `<b>[${prefix}]</b> PID ${inst.pid} — ${completedCount}/${phaseNumbers.length} phases ${nextInfo}`
+    );
+  }
+
   return lines.join("\n");
 }
 

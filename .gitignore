@@ -16,6 +16,7 @@ package-lock.json
 # PIV Orchestrator runtime
 .agents/orchestrator.pid
 .agents/orchestrator.log
+.agents/orchestrator.signal
 .claude/orchestrator/dist/
 .claude/orchestrator/node_modules/
 

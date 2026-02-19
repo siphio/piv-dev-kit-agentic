@@ -1,6 +1,6 @@
 // PIV Orchestrator — Manifest YAML Manager (merge-only semantics)
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import yaml from "js-yaml";
 import type {
@@ -41,7 +41,16 @@ export async function writeManifest(projectDir: string, manifest: Manifest): Pro
     noRefs: true,
     sortKeys: false,
   });
-  await writeFile(filePath, content, "utf-8");
+
+  // Atomic write: write to temp file, then rename (POSIX atomic on same filesystem)
+  const tmpPath = filePath + ".tmp";
+  try {
+    await writeFile(tmpPath, content, "utf-8");
+    await rename(tmpPath, filePath);
+  } catch {
+    // Fallback to direct write if rename fails
+    await writeFile(filePath, content, "utf-8");
+  }
 }
 
 /**
