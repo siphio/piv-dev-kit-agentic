@@ -126,6 +126,7 @@ Create a `CLAUDE.md` file (or similar global rules file) following this structur
     - Document which services the agent uses and how to configure them
     - Specify environment variables for API keys and credentials
     - Note any test accounts or sandbox endpoints for validation
+    - **Auth method rule:** If the project uses the PIV orchestrator / Claude Agent SDK, state explicitly that `ANTHROPIC_API_KEY` is NOT required — the orchestrator spawns the `claude` CLI as a subprocess which handles its own auth via the user's OAuth token (Claude Max subscription). This must appear prominently so no command ever requests it.
     - Reference `.agents/services.yaml` for structured service configuration:
       ```yaml
       services:

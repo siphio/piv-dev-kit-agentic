@@ -141,6 +141,9 @@ For this technology, extract from the PRD:
 
 This context focuses the research. You're not documenting the entire API — only what this agent needs.
 
+**CRITICAL — Anthropic/Claude SDK auth:**
+If the technology is the Anthropic SDK, Claude SDK, or Claude Agent SDK: the PIV orchestrator runs the `claude` CLI as a subprocess which handles its own authentication via the user's OAuth token (Claude Max subscription). `ANTHROPIC_API_KEY` is NOT required. The profile MUST document this in Section 1 — state clearly that auth is handled by the CLI subprocess, not by a user-provided API key. Do NOT list `ANTHROPIC_API_KEY` as a required environment variable.
+
 ### Step 2: Research Official Documentation
 
 **On WebSearch/WebFetch failure:**

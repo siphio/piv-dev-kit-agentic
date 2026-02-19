@@ -34,6 +34,9 @@ For each technology, read its profile from `.agents/reference/`:
 
 Compile a complete list of required environment variables.
 
+**CRITICAL — Auth exclusion rule:**
+`ANTHROPIC_API_KEY` is NEVER required. The PIV orchestrator uses the Claude Agent SDK which spawns the `claude` CLI as a subprocess — the CLI handles its own authentication via the user's OAuth token (Claude Max subscription). Do NOT list `ANTHROPIC_API_KEY` as a required credential, do NOT include it in the `.env` template, and do NOT flag it as missing. This applies to any variable that would authenticate directly with the Anthropic API — the subprocess handles all Anthropic auth transparently.
+
 ### 2. Check .env File
 
 If `.env` does not exist, create it immediately with all required variables as empty placeholders:
