@@ -37,6 +37,12 @@ function baseManifest(): Manifest {
       },
     },
     plans: [{ path: ".agents/plans/phase-1.md", phase: 1, status: "complete", generated_at: "2026-02-18" }],
+    preflight: {
+      status: "passed",
+      completed_at: "2026-02-18",
+      credentials_verified: 1,
+      technologies_checked: ["claude-agent-sdk"],
+    },
     last_updated: "2026-02-18",
   };
 }
@@ -351,5 +357,61 @@ describe("determineNextAction", () => {
     expect(action.command).toBe("execute");
     expect(action.argument).toBe(".agents/plans/phase-1.md");
     expect(action.confidence).toBe("high");
+  });
+
+  it("recommends research-stack when no profiles exist", () => {
+    const manifest: Manifest = {
+      ...baseManifest(),
+      profiles: {},
+    };
+    const action = determineNextAction(manifest);
+    expect(action.command).toBe("research-stack");
+    expect(action.argument).toBeUndefined();
+    expect(action.reason).toContain("No technology profiles");
+  });
+
+  it("recommends preflight when not yet run", () => {
+    const manifest: Manifest = {
+      ...baseManifest(),
+      preflight: undefined,
+    };
+    const action = determineNextAction(manifest);
+    expect(action.command).toBe("preflight");
+    expect(action.reason).toContain("not yet run");
+  });
+
+  it("recommends preflight when status is blocked", () => {
+    const manifest: Manifest = {
+      ...baseManifest(),
+      preflight: {
+        status: "blocked",
+        completed_at: "2026-02-18",
+        credentials_verified: 0,
+        technologies_checked: ["claude-agent-sdk"],
+      },
+    };
+    const action = determineNextAction(manifest);
+    expect(action.command).toBe("preflight");
+    expect(action.reason).toContain("blocked");
+  });
+
+  it("skips to phase progression when profiles and preflight are satisfied", () => {
+    // baseManifest() already has fresh profiles and passed preflight
+    const action = determineNextAction(baseManifest());
+    expect(action.command).not.toBe("research-stack");
+    expect(action.command).not.toBe("preflight");
+    // Phase 1 has plan complete + execution not_started → execute
+    expect(action.command).toBe("execute");
+  });
+
+  it("prioritizes research-stack over preflight when both are missing", () => {
+    const manifest: Manifest = {
+      ...baseManifest(),
+      profiles: {},
+      preflight: undefined,
+    };
+    const action = determineNextAction(manifest);
+    // research-stack (4a) fires before preflight (4c)
+    expect(action.command).toBe("research-stack");
   });
 });

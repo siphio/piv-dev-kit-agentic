@@ -10,6 +10,7 @@ const SESSION_DEFAULTS: Record<PivCommand, { maxTurns: number; maxBudgetUsd: num
   "validate-implementation":  { maxTurns: 100, maxBudgetUsd: 5.00,  timeoutMs: 30 * 60_000 },   // 30 min
   "commit":                   { maxTurns: 10,  maxBudgetUsd: 0.50,  timeoutMs: 5 * 60_000 },    //  5 min
   "research-stack":           { maxTurns: 100, maxBudgetUsd: 5.00,  timeoutMs: 30 * 60_000 },   // 30 min
+  "preflight":                { maxTurns: 50,  maxBudgetUsd: 2.00,  timeoutMs: 15 * 60_000 },   // 15 min
 };
 
 export function loadConfig(): OrchestratorConfig {

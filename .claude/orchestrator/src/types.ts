@@ -29,7 +29,8 @@ export type PivCommand =
   | "execute"
   | "validate-implementation"
   | "commit"
-  | "research-stack";
+  | "research-stack"
+  | "preflight";
 
 // --- Session Types ---
 

@@ -76,7 +76,9 @@ function getPlanPath(manifest: Manifest, phase: number): string | undefined {
  * 1. Pending failure with retries remaining → retry
  * 2. Pending failure with no retries → rollback
  * 3. Active checkpoint with no failure → resume execution
- * 4. Stale/missing profiles → research-stack --refresh
+ * 4a. No profiles → research-stack
+ * 4b. Stale profiles → research-stack --refresh
+ * 4c. Preflight not run or blocked → preflight
  * 5. No PRD → create-prd
  * 6. Next phase needs plan → plan-feature
  * 7. Plan exists, not executed → execute
@@ -117,19 +119,37 @@ export function determineNextAction(manifest: Manifest): NextAction {
     };
   }
 
-  // 4: Stale/missing profiles
-  if (manifest.profiles) {
-    const staleProfiles = Object.entries(manifest.profiles)
-      .filter(([_, p]) => p.freshness === "stale")
-      .map(([name]) => name);
-    if (staleProfiles.length > 0) {
-      return {
-        command: "research-stack",
-        argument: "--refresh",
-        reason: `Stale profiles: ${staleProfiles.join(", ")}`,
-        confidence: "high",
-      };
-    }
+  // 4a: No profiles at all → research-stack
+  if (!manifest.profiles || Object.keys(manifest.profiles).length === 0) {
+    return {
+      command: "research-stack",
+      reason: "No technology profiles — run research before planning",
+      confidence: "high",
+    };
+  }
+
+  // 4b: Stale profiles → research-stack --refresh
+  const staleProfiles = Object.entries(manifest.profiles)
+    .filter(([_, p]) => p.freshness === "stale")
+    .map(([name]) => name);
+  if (staleProfiles.length > 0) {
+    return {
+      command: "research-stack",
+      argument: "--refresh",
+      reason: `Stale profiles: ${staleProfiles.join(", ")}`,
+      confidence: "high",
+    };
+  }
+
+  // 4c: Preflight not run or blocked → preflight
+  if (!manifest.preflight || manifest.preflight.status === "blocked") {
+    return {
+      command: "preflight",
+      reason: manifest.preflight
+        ? "Preflight was blocked — re-verify credentials"
+        : "Preflight not yet run — verify credentials before execution",
+      confidence: "high",
+    };
   }
 
   // 5: No PRD

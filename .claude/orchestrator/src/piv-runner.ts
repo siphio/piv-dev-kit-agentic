@@ -53,10 +53,43 @@ function commitPairing(): { commands: string[]; type: PivCommand } {
   };
 }
 
+function researchPairing(): { commands: string[]; type: PivCommand } {
+  return {
+    commands: ["/research-stack"],
+    type: "research-stack",
+  };
+}
+
+function preflightPairing(): { commands: string[]; type: PivCommand } {
+  return {
+    commands: ["/preflight"],
+    type: "preflight",
+  };
+}
+
 // --- Helpers ---
 
 function getLastResult(results: SessionResult[]): SessionResult {
   return results[results.length - 1];
+}
+
+function checkProfilesNeeded(manifest: Manifest): { needed: boolean; reason: string } {
+  if (!manifest.profiles || Object.keys(manifest.profiles).length === 0) {
+    return { needed: true, reason: "No technology profiles found" };
+  }
+  const staleProfiles = Object.entries(manifest.profiles)
+    .filter(([_, p]) => p.freshness === "stale")
+    .map(([name]) => name);
+  if (staleProfiles.length > 0) {
+    return { needed: true, reason: `Stale profiles: ${staleProfiles.join(", ")}` };
+  }
+  return { needed: false, reason: "" };
+}
+
+function checkPreflightNeeded(manifest: Manifest): boolean {
+  if (!manifest.preflight) return true;
+  if (manifest.preflight.status === "blocked") return true;
+  return false;
 }
 
 function formatPivError(
@@ -79,6 +112,78 @@ function formatPivError(
     `checkpoint: ${checkpoint ?? "none"}`,
     "",
   ].join("\n");
+}
+
+// --- Pre-Loop: Research + Preflight ---
+
+/**
+ * Run pre-loop checks before entering the phase loop.
+ * 1. Checks if profiles are missing/stale → runs /research-stack
+ * 2. Checks if preflight hasn't passed → runs /preflight
+ * Returns false if preflight blocks (credentials missing), stopping the orchestrator.
+ */
+async function runPreLoop(
+  projectDir: string,
+  notifier?: TelegramNotifier
+): Promise<boolean> {
+  let manifest = await readManifest(projectDir);
+
+  // --- Step 1: Research Stack (profiles) ---
+  const needsResearch = checkProfilesNeeded(manifest);
+  if (needsResearch.needed) {
+    console.log(`\n🔬 Pre-loop — Running /research-stack`);
+    console.log(`   Reason: ${needsResearch.reason}`);
+    await notifier?.sendText(`🔬 Running /research-stack — ${needsResearch.reason}`);
+
+    const pairing = researchPairing();
+    const results = await runCommandPairing(pairing.commands, projectDir, pairing.type);
+    const lastResult = getLastResult(results);
+
+    if (lastResult.error) {
+      console.log(`  ❌ /research-stack failed: ${lastResult.error.messages.join("; ")}`);
+      // Non-blocking — preflight will catch missing profiles downstream
+    } else {
+      console.log(`  ✅ /research-stack complete`);
+    }
+    manifest = await readManifest(projectDir);
+  } else {
+    console.log(`\n✅ Pre-loop — Profiles exist and are fresh`);
+  }
+
+  // --- Step 2: Preflight ---
+  const needsPreflight = checkPreflightNeeded(manifest);
+  if (needsPreflight) {
+    console.log(`\n🛫 Pre-loop — Running /preflight`);
+    await notifier?.sendText(`🛫 Running /preflight — verifying credentials`);
+
+    const pairing = preflightPairing();
+    const results = await runCommandPairing(pairing.commands, projectDir, pairing.type);
+    const lastResult = getLastResult(results);
+
+    if (lastResult.error) {
+      console.log(`  ❌ /preflight failed: ${lastResult.error.messages.join("; ")}`);
+      await notifier?.sendEscalation(0, "integration_auth",
+        lastResult.error.messages.join("; "), "preflight session failed");
+      return false;
+    }
+
+    manifest = await readManifest(projectDir);
+    const preflightStatus = lastResult.hooks["preflight_status"] ?? manifest.preflight?.status;
+
+    if (preflightStatus === "blocked") {
+      console.log(`\n🛑 Preflight BLOCKED — credentials missing`);
+      const missing = lastResult.hooks["credentials_missing"] ?? "unknown";
+      console.log(`   Missing: ${missing}`);
+      await notifier?.sendEscalation(0, "integration_auth",
+        `Preflight blocked: ${missing}`, "Waiting for credentials");
+      return false;
+    }
+    console.log(`  ✅ Preflight passed`);
+  } else {
+    console.log(`✅ Pre-loop — Preflight already passed`);
+  }
+
+  return true;
 }
 
 // --- Phase Runner ---
@@ -281,6 +386,16 @@ export async function runAllPhases(
       await notifier.sendRestart(nextPhase, "Orchestrator restarted — resuming autonomous execution");
       console.log(`  🔄 Restart notification sent — resuming from Phase ${nextPhase}`);
     }
+  }
+
+  // --- Pre-Loop: Research + Preflight ---
+  const canProceed = await runPreLoop(projectDir, notifier);
+  if (!canProceed) {
+    console.log(`\n🛑 Pre-loop checks failed — orchestrator stopping`);
+    await notifier?.sendText(
+      "🛑 <b>Orchestrator stopped</b> — preflight checks failed. Provide missing credentials and restart."
+    );
+    return;
   }
 
   console.log(`\n🚀 Starting autonomous execution — ${phases.length} phases\n`);
