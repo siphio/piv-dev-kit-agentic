@@ -1,12 +1,23 @@
 # Environment variables (credentials, tokens)
 .env
-.env.*
+.env.local
+.env.production
+!.env.example
 
 # Node modules
 node_modules/
 
 # Build output
 dist/
+
+# Lock files
+package-lock.json
+
+# PIV Orchestrator runtime
+.agents/orchestrator.pid
+.agents/orchestrator.log
+.claude/orchestrator/dist/
+.claude/orchestrator/node_modules/
 
 # OS files
 .DS_Store
