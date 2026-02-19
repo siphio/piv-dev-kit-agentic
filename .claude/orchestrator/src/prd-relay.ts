@@ -6,7 +6,6 @@ import type { TelegramNotifier } from "./telegram-notifier.js";
 
 const PRD_SESSION_DEFAULTS: Partial<SessionConfig> = {
   maxTurns: 50,
-  maxBudgetUsd: 5.0,
 };
 
 /**

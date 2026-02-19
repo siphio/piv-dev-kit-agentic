@@ -38,7 +38,6 @@ export interface SessionConfig {
   prompt: string;
   cwd: string;
   maxTurns: number;
-  maxBudgetUsd: number;
   resumeSessionId?: string;
   model?: string;
   timeoutMs?: number;

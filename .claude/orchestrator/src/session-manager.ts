@@ -32,7 +32,6 @@ function buildOptions(config: SessionConfig, projectDir: string) {
     settingSources: ["project"] as SettingSource[],
     systemPrompt: { type: "preset" as const, preset: "claude_code" as const },
     maxTurns: config.maxTurns,
-    maxBudgetUsd: config.maxBudgetUsd,
     abortController: controller,
     env: cleanEnv,
     ...(config.resumeSessionId ? { resume: config.resumeSessionId } : {}),
@@ -110,7 +109,6 @@ export async function runCommandPairing(
       prompt: cmd,
       cwd: projectDir,
       maxTurns: defaults.maxTurns,
-      maxBudgetUsd: defaults.maxBudgetUsd,
       timeoutMs: defaults.timeoutMs,
       resumeSessionId: currentSessionId,
     };
