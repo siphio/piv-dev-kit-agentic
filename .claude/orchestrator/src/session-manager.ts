@@ -18,6 +18,10 @@ function buildOptions(config: SessionConfig, projectDir: string) {
   const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+  // Unset CLAUDECODE to prevent nesting guard when orchestrator runs inside
+  // a Claude Code session (e.g. spawned via /go or during development).
+  const { CLAUDECODE: _, ...cleanEnv } = process.env;
+
   const options = {
     model: config.model ?? "claude-opus-4-6",
     cwd: projectDir,
@@ -29,6 +33,7 @@ function buildOptions(config: SessionConfig, projectDir: string) {
     maxTurns: config.maxTurns,
     maxBudgetUsd: config.maxBudgetUsd,
     abortController: controller,
+    env: cleanEnv,
     ...(config.resumeSessionId ? { resume: config.resumeSessionId } : {}),
   };
 

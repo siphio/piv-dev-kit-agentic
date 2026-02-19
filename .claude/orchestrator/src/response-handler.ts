@@ -34,6 +34,17 @@ export async function processSession(
       }
     }
 
+    // Rate limit events arrive between system/init and first assistant message.
+    // Log for observability but don't treat as errors — the SDK handles backoff.
+    if (message.type === "rate_limit_event") {
+      const info = message.rate_limit_info;
+      if (info?.status === "allowed") {
+        console.log(`  Rate limit: allowed (resets at ${new Date((info.resetsAt ?? 0) * 1000).toISOString()})`);
+      } else {
+        console.log(`  ⚠️ Rate limit: ${info?.status ?? "unknown"} (type: ${info?.rateLimitType ?? "unknown"})`);
+      }
+    }
+
     if (message.type === "assistant" && message.message?.content) {
       for (const block of message.message.content) {
         if ("text" in block) {
