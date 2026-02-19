@@ -232,9 +232,14 @@ export async function runPhase(phase: number, projectDir: string): Promise<void>
 
   // --- Commit ---
   console.log(`\n📦 Phase ${phase} — Committing`);
-  const pairing = commitPairing();
-  const results = await runCommandPairing(pairing.commands, projectDir, pairing.type);
-  totalCost.usd += results.reduce((sum, r) => sum + r.costUsd, 0);
+  const commitResults = await runCommandPairing(commitPairing().commands, projectDir, "commit");
+  totalCost.usd += commitResults.reduce((sum, r) => sum + r.costUsd, 0);
+  const commitResult = getLastResult(commitResults);
+
+  if (commitResult.error) {
+    await handleError(manifest, projectDir, "commit", phase, commitResult, undefined);
+    return;
+  }
 
   // Resolve checkpoint
   manifest = await readManifest(projectDir);
@@ -344,35 +349,86 @@ async function handleError(
   );
   console.log(pivError);
 
-  // Determine resolution
-  if (category === "partial_execution" && checkpointTag) {
-    if (retryCount === 0) {
+  // Determine resolution based on error category and retry state
+  if (taxonomy.needsHuman) {
+    // integration_auth, prd_gap — escalate immediately with blocking notification
+    failure.resolution = "escalated_blocking";
+    manifest = appendNotification(manifest, {
+      timestamp: new Date().toISOString(),
+      type: "escalation",
+      severity: "critical",
+      category,
+      phase,
+      details: `Phase ${phase} ${category}: ${errorText}`,
+      blocking: true,
+      action_taken: `Escalated immediately — ${taxonomy.recoveryAction}`,
+    });
+  } else if (checkpointTag && retryCount >= taxonomy.maxRetries) {
+    // Retries exhausted with checkpoint — rollback and escalate
+    if (category === "partial_execution" && retryCount === 0) {
+      // partial_execution first failure: auto-rollback and retry
       console.log(`  🔄 Auto-rolling back to checkpoint: ${checkpointTag}`);
-      rollbackToCheckpoint(projectDir, checkpointTag);
-      failure.resolution = "auto_rollback_retry";
-      manifest = appendNotification(manifest, {
-        timestamp: new Date().toISOString(),
-        type: "info",
-        severity: "warning",
-        category: "partial_execution",
-        phase,
-        details: `Auto-rolled back Phase ${phase}, retrying execution`,
-        blocking: false,
-        action_taken: "Rolled back to checkpoint, will retry on next cycle",
-      });
+      try {
+        rollbackToCheckpoint(projectDir, checkpointTag);
+        failure.resolution = "auto_rollback_retry";
+        manifest = appendNotification(manifest, {
+          timestamp: new Date().toISOString(),
+          type: "info",
+          severity: "warning",
+          category: "partial_execution",
+          phase,
+          details: `Auto-rolled back Phase ${phase}, retrying execution`,
+          blocking: false,
+          action_taken: "Rolled back to checkpoint, will retry on next cycle",
+        });
+      } catch (rollbackErr) {
+        console.log(`  ❌ Rollback failed: ${rollbackErr}`);
+        failure.resolution = "escalated_blocking";
+        manifest = appendNotification(manifest, {
+          timestamp: new Date().toISOString(),
+          type: "escalation",
+          severity: "critical",
+          category: "partial_execution",
+          phase,
+          details: `Phase ${phase} rollback failed — requires human intervention`,
+          blocking: true,
+          action_taken: "Rollback to checkpoint failed, awaiting human resolution",
+        });
+      }
     } else {
+      // All other exhausted-retry cases: rollback and escalate
+      console.log(`  🔄 Rolling back to checkpoint: ${checkpointTag}`);
+      try {
+        rollbackToCheckpoint(projectDir, checkpointTag);
+        failure.resolution = "rolled_back";
+      } catch {
+        console.log(`  ⚠️ Rollback failed — checkpoint may be stale`);
+      }
       failure.resolution = "escalated_blocking";
       manifest = appendNotification(manifest, {
         timestamp: new Date().toISOString(),
         type: "escalation",
         severity: "critical",
-        category: "partial_execution",
+        category,
         phase,
-        details: `Phase ${phase} execution failed twice — requires human intervention`,
+        details: `Phase ${phase} ${category} — retries exhausted, rolled back to checkpoint`,
         blocking: true,
-        action_taken: "Paused execution, awaiting human resolution",
+        action_taken: "Rolled back and paused execution, awaiting human resolution",
       });
     }
+  } else if (retryCount >= taxonomy.maxRetries) {
+    // Retries exhausted without checkpoint — escalate only
+    failure.resolution = "escalated_blocking";
+    manifest = appendNotification(manifest, {
+      timestamp: new Date().toISOString(),
+      type: "escalation",
+      severity: "critical",
+      category,
+      phase,
+      details: `Phase ${phase} ${category} — retries exhausted, no checkpoint available`,
+      blocking: true,
+      action_taken: "Paused execution, awaiting human resolution",
+    });
   }
 
   await writeManifest(projectDir, manifest);
