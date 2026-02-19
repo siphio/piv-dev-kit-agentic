@@ -11,7 +11,7 @@ import {
   updatePhaseStatus,
   setNextAction,
 } from "./manifest-manager.js";
-import { determineNextAction, findPendingFailure, findActiveCheckpoint } from "./state-machine.js";
+import { determineNextAction, findPendingFailure, findActiveCheckpoint, getNextUnfinishedPhase } from "./state-machine.js";
 import { classifyError, getTaxonomy, canRetry } from "./error-classifier.js";
 import { createCheckpoint, rollbackToCheckpoint } from "./git-manager.js";
 import type {
@@ -266,12 +266,22 @@ export async function runPhase(
 export async function runAllPhases(
   projectDir: string,
   notifier?: TelegramNotifier,
-  pauseCheck?: () => Promise<void>
+  pauseCheck?: () => Promise<void>,
+  isRestart?: boolean
 ): Promise<void> {
   let manifest = await readManifest(projectDir);
   const phases = Object.keys(manifest.phases)
     .map(Number)
     .sort((a, b) => a - b);
+
+  // Send restart notification if recovering from crash/interrupt
+  if (isRestart && notifier) {
+    const nextPhase = getNextUnfinishedPhase(manifest);
+    if (nextPhase !== null) {
+      await notifier.sendRestart(nextPhase, "Orchestrator restarted — resuming autonomous execution");
+      console.log(`  🔄 Restart notification sent — resuming from Phase ${nextPhase}`);
+    }
+  }
 
   console.log(`\n🚀 Starting autonomous execution — ${phases.length} phases\n`);
 

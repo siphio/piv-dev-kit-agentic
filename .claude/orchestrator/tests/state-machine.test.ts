@@ -273,4 +273,62 @@ describe("determineNextAction", () => {
     expect(action.command).toBe("execute");
     expect(action.reason).toContain("interrupted");
   });
+
+  it("recommends rollback immediately for orchestrator_crash (0 retries)", () => {
+    const manifest: Manifest = {
+      ...baseManifest(),
+      failures: [{
+        command: "orchestrator",
+        phase: 1,
+        error_category: "orchestrator_crash",
+        timestamp: "2026-02-19",
+        retry_count: 0,
+        max_retries: 0,
+        resolution: "pending",
+        details: "Uncaught exception: out of memory",
+      }],
+    };
+    const action = determineNextAction(manifest);
+    expect(action.command).toBe("rollback");
+    expect(action.reason).toContain("orchestrator_crash");
+  });
+
+  it("recommends rollback immediately for manifest_corruption (0 retries)", () => {
+    const manifest: Manifest = {
+      ...baseManifest(),
+      failures: [{
+        command: "prime",
+        phase: 0,
+        error_category: "manifest_corruption",
+        timestamp: "2026-02-19",
+        retry_count: 0,
+        max_retries: 0,
+        resolution: "pending",
+        details: "YAML parse error in manifest",
+      }],
+    };
+    const action = determineNextAction(manifest);
+    expect(action.command).toBe("rollback");
+    expect(action.reason).toContain("manifest_corruption");
+  });
+
+  it("resumes execution with plan path when active checkpoint has matching plan", () => {
+    const manifest: Manifest = {
+      ...baseManifest(),
+      phases: {
+        1: { plan: "complete", execution: "in_progress", validation: "not_run" },
+        2: { plan: "not_started", execution: "not_started", validation: "not_run" },
+      },
+      checkpoints: [{
+        tag: "piv-checkpoint/phase-1-abc",
+        phase: 1,
+        created_before: "execute",
+        status: "active",
+      }],
+    };
+    const action = determineNextAction(manifest);
+    expect(action.command).toBe("execute");
+    expect(action.argument).toBe(".agents/plans/phase-1.md");
+    expect(action.confidence).toBe("high");
+  });
 });

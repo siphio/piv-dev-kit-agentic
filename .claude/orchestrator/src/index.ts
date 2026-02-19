@@ -3,7 +3,9 @@
 import { loadConfig } from "./config.js";
 import { runPhase, runAllPhases } from "./piv-runner.js";
 import { readManifest, writeManifest, appendFailure } from "./manifest-manager.js";
-import { determineNextAction } from "./state-machine.js";
+import { determineNextAction, findActiveCheckpoint, findPendingFailure } from "./state-machine.js";
+import { checkForRunningInstance, writePidFile, removePidFile } from "./process-manager.js";
+import { hasUncommittedChanges } from "./git-manager.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { Bot } from "grammy";
@@ -71,7 +73,7 @@ async function main(): Promise<void> {
 
   const manifest = await readManifest(projectDir);
 
-  // Dry run mode: show recommendation and exit (no bot needed)
+  // Dry run mode: show recommendation and exit (no PID, no bot)
   if (cliArgs.dryRun) {
     const action = determineNextAction(manifest);
     console.log("\n📋 Dry Run — Recommended Next Action:");
@@ -82,12 +84,44 @@ async function main(): Promise<void> {
     return;
   }
 
+  // --- Process Lifecycle: Duplicate Prevention ---
+  const instanceCheck = checkForRunningInstance(projectDir);
+  if (instanceCheck.running) {
+    console.error(`\n❌ Orchestrator already running (PID: ${instanceCheck.pid})`);
+    console.error("   Kill the existing process first, or remove .agents/orchestrator.pid if stale.");
+    process.exit(1);
+  }
+
+  // Write PID file before any other work
+  writePidFile(projectDir);
+  console.log(`🔒 PID file written (PID: ${process.pid})`);
+
+  // --- Startup Recovery: Check git state ---
+  let isRestart = false;
+  try {
+    if (hasUncommittedChanges(projectDir)) {
+      console.log("⚠️ Uncommitted changes detected — validating state before continuing");
+    }
+  } catch {
+    console.log("⚠️ Could not check git state");
+  }
+
+  // --- Startup Recovery: Detect crash/interrupt recovery ---
+  const activeCheckpoint = findActiveCheckpoint(manifest);
+  const pendingFailure = findPendingFailure(manifest);
+  if (activeCheckpoint || pendingFailure) {
+    isRestart = true;
+    const action = determineNextAction(manifest);
+    console.log(`🔄 Recovering from previous state — ${action.reason}`);
+  }
+
   // --- Telegram Setup (optional) ---
   let notifier: TelegramNotifier | undefined;
   let bot: Bot | undefined;
   let prdRelay: PrdRelay | undefined;
   const state = { running: false, paused: false };
   let pauseCheck: (() => Promise<void>) | undefined;
+  let telegramBot: Bot | undefined;
 
   if (config.telegram) {
     console.log(`\n📱 Telegram: enabled (chat: ${config.telegram.chatId}, prefix: ${config.telegram.projectPrefix})`);
@@ -123,33 +157,68 @@ async function main(): Promise<void> {
       projectDir,
     };
 
-    const telegramBot = createBot(config.telegram, controls, notifier);
-
-    // Graceful shutdown
-    const shutdown = () => {
-      console.log("\n🛑 Shutting down...");
-      telegramBot.stop();
-      process.exit(0);
-    };
-    process.on("SIGINT", shutdown);
-    process.on("SIGTERM", shutdown);
+    telegramBot = createBot(config.telegram, controls, notifier);
 
     // Register commands and start polling (non-blocking)
     await registerBotCommands(telegramBot);
     telegramBot.start();
     console.log("  🤖 Telegram bot polling started");
 
-    bot = telegramBot;
+    // Notify Telegram of restart if recovering
+    if (isRestart) {
+      await notifier.sendText("⚠️ Uncommitted changes detected on restart" );
+    }
   }
 
-  // Execute
+  // --- Unified Graceful Shutdown ---
+  const shutdown = () => {
+    console.log("\n🛑 Shutting down...");
+    try {
+      removePidFile(projectDir);
+    } catch {
+      // Don't fail shutdown on PID removal error
+    }
+    telegramBot?.stop();
+    process.exit(0);
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+
+  // --- Uncaught Exception Handler ---
+  process.on("uncaughtException", async (err) => {
+    console.error(`\n💥 Uncaught exception: ${err.message}`);
+    try {
+      removePidFile(projectDir);
+    } catch {
+      // Best effort PID cleanup
+    }
+    try {
+      const currentManifest = await readManifest(projectDir);
+      const updated = appendFailure(currentManifest, {
+        command: "orchestrator",
+        phase: cliArgs.phase ?? 0,
+        error_category: "orchestrator_crash",
+        timestamp: new Date().toISOString(),
+        retry_count: 0,
+        max_retries: 0,
+        resolution: "pending",
+        details: err.message,
+      });
+      await writeManifest(projectDir, updated);
+    } catch {
+      // Best effort manifest write
+    }
+    process.exit(1);
+  });
+
+  // --- Execute ---
   try {
     state.running = true;
     if (cliArgs.phase !== undefined) {
       console.log(`\n🎯 Running Phase ${cliArgs.phase} only\n`);
       await runPhase(cliArgs.phase, projectDir, notifier, pauseCheck);
     } else {
-      await runAllPhases(projectDir, notifier, pauseCheck);
+      await runAllPhases(projectDir, notifier, pauseCheck, isRestart);
     }
     state.running = false;
   } catch (err: unknown) {
@@ -190,6 +259,13 @@ async function main(): Promise<void> {
     console.error(`retry_eligible: true`);
     console.error(`retries_remaining: 1`);
     console.error(`checkpoint: none`);
+
+    // Clean up PID file on error exit
+    try {
+      removePidFile(projectDir);
+    } catch {
+      // Best effort
+    }
 
     process.exit(1);
   }

@@ -12,6 +12,8 @@ const ERROR_TAXONOMY: Record<ErrorCategory, ErrorTaxonomyEntry> = {
   prd_gap:                { maxRetries: 0, needsHuman: true,  recoveryAction: "escalate — PRD needs human revision" },
   partial_execution:      { maxRetries: 1, needsHuman: false, recoveryAction: "rollback to checkpoint" },
   line_budget_exceeded:   { maxRetries: 1, needsHuman: false, recoveryAction: "auto-trim and retry" },
+  orchestrator_crash:     { maxRetries: 0, needsHuman: false, recoveryAction: "resume from manifest state" },
+  manifest_corruption:    { maxRetries: 0, needsHuman: false, recoveryAction: "rebuild manifest via /prime" },
 };
 
 interface ClassificationPattern {
@@ -20,6 +22,15 @@ interface ClassificationPattern {
 }
 
 const CLASSIFICATION_PATTERNS: ClassificationPattern[] = [
+  // Higher-specificity patterns first to avoid false matches
+  {
+    category: "orchestrator_crash",
+    patterns: [/crash/i, /orchestrator.*restart/i, /stale.*pid/i],
+  },
+  {
+    category: "manifest_corruption",
+    patterns: [/manifest.*corrupt/i, /yaml.*parse/i, /manifest.*invalid/i],
+  },
   {
     category: "integration_auth",
     patterns: [/credential/i, /auth/i, /\b401\b/, /unauthorized/i, /forbidden/i, /\b403\b/],

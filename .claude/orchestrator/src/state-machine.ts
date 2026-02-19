@@ -200,6 +200,8 @@ function getErrorTaxonomy(category: string): { maxRetries: number } {
     prd_gap: 0,
     partial_execution: 1,
     line_budget_exceeded: 1,
+    orchestrator_crash: 0,
+    manifest_corruption: 0,
   };
   return { maxRetries: map[category] ?? 0 };
 }

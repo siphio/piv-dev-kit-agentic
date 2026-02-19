@@ -11,7 +11,9 @@ export type ErrorCategory =
   | "stale_artifact"
   | "prd_gap"
   | "partial_execution"
-  | "line_budget_exceeded";
+  | "line_budget_exceeded"
+  | "orchestrator_crash"
+  | "manifest_corruption";
 
 export interface ErrorTaxonomyEntry {
   maxRetries: number;
@@ -209,6 +211,14 @@ export interface ApprovalResult {
 }
 
 export type OrchestratorMode = "cli" | "telegram";
+
+// --- Process Management Types ---
+
+export interface ProcessInfo {
+  pid: number;
+  startedAt: string;
+  projectDir: string;
+}
 
 // --- Config Types ---
 

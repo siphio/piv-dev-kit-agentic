@@ -41,6 +41,16 @@ describe("classifyError", () => {
   it("falls back to partial_execution for unknown errors", () => {
     expect(classifyError("Something completely unexpected happened", "execute")).toBe("partial_execution");
   });
+
+  it("classifies orchestrator crash errors", () => {
+    expect(classifyError("orchestrator crash detected", "orchestrator")).toBe("orchestrator_crash");
+    expect(classifyError("stale PID file found", "orchestrator")).toBe("orchestrator_crash");
+  });
+
+  it("classifies manifest corruption errors", () => {
+    expect(classifyError("manifest YAML parse error", "prime")).toBe("manifest_corruption");
+    expect(classifyError("manifest is corrupt and unreadable", "prime")).toBe("manifest_corruption");
+  });
 });
 
 describe("getTaxonomy", () => {
@@ -54,6 +64,16 @@ describe("getTaxonomy", () => {
     expect(getTaxonomy("integration_rate_limit").maxRetries).toBe(3);
 
     expect(getTaxonomy("partial_execution").maxRetries).toBe(1);
+  });
+
+  it("returns correct taxonomy for orchestrator_crash", () => {
+    expect(getTaxonomy("orchestrator_crash").maxRetries).toBe(0);
+    expect(getTaxonomy("orchestrator_crash").needsHuman).toBe(false);
+  });
+
+  it("returns correct taxonomy for manifest_corruption", () => {
+    expect(getTaxonomy("manifest_corruption").maxRetries).toBe(0);
+    expect(getTaxonomy("manifest_corruption").needsHuman).toBe(false);
   });
 });
 

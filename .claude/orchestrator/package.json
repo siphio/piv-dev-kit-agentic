@@ -6,6 +6,8 @@
   "main": "dist/index.js",
   "scripts": {
     "start": "tsx src/index.ts",
+    "start:prod": "node dist/index.js",
+    "prebuild": "npm run typecheck",
     "build": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -92,6 +92,15 @@ export class TelegramNotifier {
   }
 
   /**
+   * Notify orchestrator restart with resume context (SC-011).
+   */
+  async sendRestart(phase: number, reason: string): Promise<void> {
+    await this.sendText(
+      `🔄 <b>Orchestrator Restarted</b>\nResuming from: Phase ${phase}\nReason: ${reason}`
+    );
+  }
+
+  /**
    * Send Tier 3 approval request with inline keyboard (SC-006).
    * Returns a Promise that resolves when the user presses a button.
    * Sends a reminder after 30 minutes if no response.

@@ -13,5 +13,11 @@ dist/
 # Lock files
 package-lock.json
 
+# PIV Orchestrator runtime
+.agents/orchestrator.pid
+.agents/orchestrator.log
+.claude/orchestrator/dist/
+.claude/orchestrator/node_modules/
+
 # OS files
 .DS_Store
