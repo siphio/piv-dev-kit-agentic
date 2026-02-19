@@ -8,22 +8,22 @@
 
 ## 1. Authentication & Setup
 
-**Auth Type**: API Key (Anthropic Console)
-**Auth Location**: Environment variable `ANTHROPIC_API_KEY`, read automatically by SDK
+**Auth Type**: OAuth via subprocess (Claude Max subscription)
+**Auth Location**: The `claude` CLI reads the OAuth token from the macOS Keychain automatically — no env var required.
 
-**Critical Note on OAuth**: The Claude Agent SDK does NOT support `CLAUDE_CODE_OAUTH_TOKEN` or Claude Pro/Max subscription tokens. The SDK requires a traditional API key from the Anthropic Console (`sk-ant-...`). Subscription tokens and API keys are separate billing systems — consumer subscription vs. pay-as-you-go API. This is confirmed in GitHub issue #6536.
+**⛔ CORRECTION — OAuth via subprocess WORKS (confirmed 2026-02-19):** The Claude Agent SDK spawns the `claude` CLI as a subprocess. The CLI handles its own authentication using the developer's OAuth token from their Claude Max subscription (stored in macOS Keychain). `ANTHROPIC_API_KEY` is NOT required and MUST NOT be used. This is subscription billing, not pay-per-token API billing.
 
 **Setup Steps:**
-1. Create account at https://platform.claude.com/
-2. Generate API key at Console > Settings > API Keys
-3. Set environment variable: `ANTHROPIC_API_KEY`
-4. Fund account (minimum $5 for Tier 1 access)
+1. Install Claude Code CLI (`claude`)
+2. Log in via `claude login` (stores OAuth token in Keychain)
+3. No env var needed — the SDK subprocess reads auth from Keychain automatically
 
 **Auth Code Pattern:**
 ```typescript
 import { query } from "@anthropic-ai/claude-agent-sdk";
 
-// SDK reads ANTHROPIC_API_KEY from environment automatically
+// SDK spawns `claude` CLI — auth handled by CLI's own OAuth token
+// No ANTHROPIC_API_KEY needed
 for await (const message of query({
   prompt: "Hello",
   options: { model: "claude-opus-4-6" }
@@ -32,18 +32,18 @@ for await (const message of query({
 }
 ```
 
-**Third-Party Provider Auth (Alternative):**
-- Amazon Bedrock: set `CLAUDE_CODE_USE_BEDROCK=1` + AWS credentials
-- Google Vertex AI: set `CLAUDE_CODE_USE_VERTEX=1` + GCP credentials
-- Microsoft Azure: set `CLAUDE_CODE_USE_FOUNDRY=1` + Azure credentials
+**Critical Implementation Notes:**
+- The `CLAUDECODE` env var MUST be unset when spawning the subprocess (nesting guard kills it with exit code 1)
+- Set `allowDangerouslySkipPermissions: true` alongside `permissionMode: "bypassPermissions"`
+- SDK emits `rate_limit_event` between `system/init` and first `assistant` message
 
 **Environment Variables:**
 | Variable | Purpose | Required |
 |----------|---------|----------|
-| `ANTHROPIC_API_KEY` | API authentication (sk-ant-...) | Yes |
-| `CLAUDE_CODE_USE_BEDROCK` | Enable Bedrock provider | No |
-| `CLAUDE_CODE_USE_VERTEX` | Enable Vertex AI provider | No |
-| `CLAUDE_CODE_USE_FOUNDRY` | Enable Azure Foundry provider | No |
+| ~~`ANTHROPIC_API_KEY`~~ | ~~API authentication~~ | **NO — NEVER USE. Auth handled by CLI subprocess via OAuth.** |
+| `CLAUDE_CODE_USE_BEDROCK` | Enable Bedrock provider (alternative) | No |
+| `CLAUDE_CODE_USE_VERTEX` | Enable Vertex AI provider (alternative) | No |
+| `CLAUDE_CODE_USE_FOUNDRY` | Enable Azure Foundry provider (alternative) | No |
 
 ---
 
@@ -390,7 +390,7 @@ Rate limits are per-organization (not per API key) and use the token bucket algo
 
 ## 7. Integration Gotchas
 
-1. **No OAuth/Subscription Token Support**: The Agent SDK requires an API key (`ANTHROPIC_API_KEY`). It cannot use `CLAUDE_CODE_OAUTH_TOKEN` from Claude Pro/Max subscriptions. This means the orchestrator incurs pay-as-you-go API costs separate from any Claude subscription. The PRD's assumption about "OAuth token management for Anthropic API authentication" is incorrect — it is simple API key auth.
+1. **OAuth via Subprocess Works (Confirmed 2026-02-19)**: The Agent SDK spawns the `claude` CLI as a subprocess. The CLI reads the developer's OAuth token from the macOS Keychain automatically — no `ANTHROPIC_API_KEY` needed. Billing goes through the Claude Max subscription. `ANTHROPIC_API_KEY` MUST NOT be used.
 
 2. **No Explicit Session Destruction API**: There is no `destroySession()` or `closeSession()` method in V1. Sessions are "destroyed" by simply not resuming them. The subprocess terminates when the generator completes. The V2 preview adds `session.close()` but this is unstable. For the orchestrator, this means "context clearing" = "start a new `query()` call without `resume`".
 
@@ -412,7 +412,7 @@ Rate limits are per-organization (not per API key) and use the token bucket algo
 
 11. **1M Context Window Requires Tier 4 + Beta Flag**: The 1M token context window is only available to Tier 4 organizations ($400+ credit purchase). Enable via `betas: ["context-1m-2025-08-07"]` in options. Premium pricing applies (2x input, 1.5x output for >200K tokens).
 
-12. **Anthropic Prohibits Offering claude.ai Login/Rate Limits**: "Unless previously approved, Anthropic does not allow third party developers to offer claude.ai login or rate limits for their products, including agents built on the Claude Agent SDK." The orchestrator must use API key auth, not subscription auth.
+12. **Anthropic Third-Party Policy Note**: Anthropic's policy on third-party developer use of claude.ai login applies to products offered to external users. For personal/internal orchestration (PIV loop), the developer's own Claude Max subscription via OAuth subprocess is the correct auth method — no `ANTHROPIC_API_KEY` needed.
 
 ---
 
@@ -424,7 +424,7 @@ Rate limits are per-organization (not per API key) and use the token bucket algo
 | Send messages within conversations (type commands) | `query({ prompt: "/command args", options: { resume: sessionId } })` | Slash commands work as prompts. V2: `session.send("/command")` |
 | Read conversation responses (read terminal output) | Iterate `for await (const msg of query(...))` | Filter by `msg.type`: `"assistant"` for text, `"result"` for final output |
 | Destroy conversations (context clearing) | Start new `query()` without `resume` | No explicit destroy API; subprocess terminates on generator completion |
-| OAuth token management | `ANTHROPIC_API_KEY` env var | NOT OAuth — simple API key. PRD assumption is incorrect. |
+| OAuth token management | CLI subprocess reads OAuth from Keychain | No env var needed. Subscription billing via Claude Max. |
 | SC-001: Full phase completion | Create query with `/prime` prompt, resume with `/plan-feature`, parse result | Two `query()` calls sharing session via `resume`, or V2 multi-turn |
 | SC-002: Multi-phase iteration | New `query()` for each phase (no resume between phases) | Achieves context isolation. Each phase starts fresh. |
 | SC-004: Credential provisioning | `query()` with `/research-stack`, parse structured output | Use `outputFormat` with JSON schema for structured parsing |
@@ -591,7 +591,7 @@ function mockQuery(fixture: string) {
 **Environment Variables Required for Testing:**
 | Variable | Purpose | Tier | Example |
 |----------|---------|------|---------|
-| `ANTHROPIC_API_KEY` | API authentication | All tiers | `sk-ant-test-...` |
+| ~~`ANTHROPIC_API_KEY`~~ | ~~API authentication~~ | — | **NOT NEEDED — CLI subprocess reads OAuth from Keychain** |
 | `PIV_TEST_PROJECT_DIR` | Test project directory | Tier 2-3 | `/tmp/piv-test-project` |
 | `PIV_TEST_MAX_BUDGET` | Maximum test budget | Tier 3 | `5.00` |
 
@@ -604,7 +604,7 @@ function mockQuery(fixture: string) {
 ### 9.3 Testing Sequence
 
 ```
-1. Tier 1 (auto-live) -> Verify SDK installed, API key valid, model accessible
+1. Tier 1 (auto-live) -> Verify SDK installed, CLI auth valid (OAuth via Keychain), model accessible
    |-- If FAIL -> Stop. SDK or auth is broken.
    +-- If PASS -> Continue
 

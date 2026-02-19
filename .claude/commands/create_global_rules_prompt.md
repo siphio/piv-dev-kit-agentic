@@ -63,28 +63,71 @@ Create a `CLAUDE.md` file (or similar global rules file) following this structur
    - Test file structure and naming conventions
    - Test patterns and examples
    - How to run tests
+   - **Unit test rule:** Mock external APIs in unit tests. Unit tests MUST run offline with zero network calls.
+   - **Live integration testing rule (MANDATORY for projects with external APIs):** `/validate-implementation` MUST execute live API tests against real external services during validation. Mocked-only validation is NEVER sufficient for projects with API integrations.
+   - **Test directory structure:**
+     - `tests/` — mocked unit tests (run offline, use mock fixtures)
+     - `tests/integration/` — live API tests using real `.env` credentials
+   - **Conftest patterns:**
+     - Unit test conftest: mock fixtures simulating API responses (AsyncMock, MagicMock)
+     - Integration test conftest: live fixtures loading credentials from `.env`, making real API calls
+     - These MUST be separate — unit tests must never accidentally hit real APIs
+   - **Fixture storage:** `.agents/fixtures/` stores recorded responses from Tier 3 live tests — serves as historical records and fallback data for Tier 4 mock-only tests
 
-7. **API Contracts** (if applicable - full-stack projects)
+7. **Live Integration Testing Protocol** (for projects with external API integrations)
+   - This project uses the PIV four-tier testing system. All tiers are defined in technology profiles (`.agents/reference/*-profile.md`, Section 9).
+
+   **The Four Tiers:**
+   - **Tier 1 — Auto-Live Health Checks:** Read-only, zero-cost calls (e.g., `GET /me`, `GET /models`, `GET /status`). Run automatically every validation. Verify connectivity and authentication.
+   - **Tier 2 — Auto-Live with Test Data:** Controlled write operations using test-prefixed data. Includes automatic cleanup. Run automatically every validation.
+   - **Tier 3 — Auto-Approved Live:** Calls that consume credits or create visible records. Credentials verified by `/preflight` before autonomous loop. Run automatically after preflight passes. Responses saved to `.agents/fixtures/`.
+   - **Tier 4 — Mock Only:** Irreversible or high-risk operations. Always use fixture data from `.agents/fixtures/`. Never make live calls.
+
+   **Enforcement rules:**
+   - `/validate-implementation` MUST execute Tier 1-3 live tests — not just mocked pytest
+   - If a technology profile exists in `.agents/reference/` with Section 9, its live tests are MANDATORY during validation
+   - Technology profile Section 9 is the source of truth for which endpoints to test, at which tier, with what test data and cleanup procedures
+   - Live test failures are classified per the error taxonomy: `integration_auth` (Tier 1 auth fails), `integration_rate_limit` (429s), `scenario_mismatch` (wrong response shape)
+
+   **Environment variables:**
+   - All API credentials for live testing are stored in `.env`
+   - `/preflight` verifies these before autonomous execution begins
+   - Integration test conftest loads from `.env` — never hardcodes test keys
+
+   **Example conftest pattern for integration tests:**
+   ```python
+   import os
+   import pytest
+
+   @pytest.fixture
+   def live_api_key():
+       key = os.environ.get("API_KEY")
+       if not key:
+           pytest.skip("API_KEY not set — skipping live test")
+       return key
+   ```
+
+8. **API Contracts** (if applicable - full-stack projects)
    - How backend models and frontend types must match
    - Error handling patterns across the boundary
    - Include examples showing the contract
 
-8. **Common Patterns**
+9. **Common Patterns**
    - 2-3 code examples of common patterns used throughout the codebase
    - Backend service pattern example
    - Frontend component/API pattern example
    - These should be general templates, not task-specific
 
-9. **Development Commands**
+10. **Development Commands**
    - Backend: install, dev server, test, lint/format commands
    - Frontend: install, dev server, build, lint/format commands
    - Any other essential workflow commands
 
-10. **AI Coding Assistant Instructions**
+11. **AI Coding Assistant Instructions**
     - 10 concise bullet points telling AI assistants how to work with this codebase
     - Include reminders about consulting these rules, following conventions, running linters, etc.
 
-11. **Terminal Output Standards**
+12. **Terminal Output Standards**
     - How AI assistants should format their responses when working on this project
     - Emphasize plain English explanations over code dumps
     - Use structured output (bullets, headers, tables) for scannability
@@ -121,12 +164,21 @@ Create a `CLAUDE.md` file (or similar global rules file) following this structur
     - The user must ALWAYS be able to see what the agent is currently doing and how far along it is
     - Never work silently — if more than 30 seconds passes without terminal output, something is wrong
 
-12. **Service Configuration** (for AI Agent Projects)
+13. **Service Configuration** (for AI Agent Projects)
     - Include this section only if the project is an AI agent with external service integrations
     - Document which services the agent uses and how to configure them
     - Specify environment variables for API keys and credentials
     - Note any test accounts or sandbox endpoints for validation
-    - **Auth method rule:** If the project uses the PIV orchestrator / Claude Agent SDK, state explicitly that `ANTHROPIC_API_KEY` is NOT required — the orchestrator spawns the `claude` CLI as a subprocess which handles its own auth via the user's OAuth token (Claude Max subscription). This must appear prominently so no command ever requests it.
+
+    **⛔ HARD RULE — ANTHROPIC_API_KEY EXCLUSION:**
+    - `ANTHROPIC_API_KEY` MUST NEVER appear in `.env`, `.env.example`, settings files, config dataclasses, conftest fixtures, or any generated code
+    - The PIV orchestrator uses the Claude Agent SDK which spawns the `claude` CLI as a subprocess — the CLI handles its own auth via the user's OAuth token (Claude Max subscription, stored in macOS Keychain)
+    - No Anthropic-specific env var is needed — not `ANTHROPIC_API_KEY`, not `ANTHROPIC_AUTH_TOKEN`, not any `sk-ant-*` key
+    - This is a billing decision: subscription billing via subprocess, NOT pay-per-token via API key
+    - If the project's technology profile for Claude/Anthropic SDK mentions `ANTHROPIC_API_KEY`, IGNORE that recommendation — it is incorrect for projects using the PIV orchestrator
+    - The CLAUDE.md MUST include this exclusion prominently so no downstream command (`/execute`, `/preflight`, `/plan-feature`) ever generates code that imports or references an Anthropic API key
+    - If the agent needs to call Claude programmatically (e.g., as a tool), it should use the `claude` CLI subprocess pattern, not direct SDK instantiation with an API key
+
     - Reference `.agents/services.yaml` for structured service configuration:
       ```yaml
       services:
@@ -139,7 +191,7 @@ Create a `CLAUDE.md` file (or similar global rules file) following this structur
       ```
     - This enables the validation system to test integrations automatically
 
-13. **Planning Workflow** (for projects using PIV loop)
+14. **Planning Workflow** (for projects using PIV loop)
     - Document the plan-feature two-phase process if the project uses `/plan-feature`:
       1. **Scope Analysis**: Output recommendations with justifications to terminal
       2. **Plan Generation**: Create plan only after user validates approach
@@ -153,7 +205,7 @@ Create a `CLAUDE.md` file (or similar global rules file) following this structur
       - Plan generated with validated decisions baked in
     - This ensures plans are solid before execution begins
 
-14. **Agent Teams Playbook** (for projects using Agent Teams)
+15. **Agent Teams Playbook** (for projects using Agent Teams)
     - Include this section if the project uses Claude Code Agent Teams for parallel execution
     - Document the teammate roles available in this project:
 
@@ -219,7 +271,7 @@ Create a `CLAUDE.md` file (or similar global rules file) following this structur
     - Quick bug fixes
     - When token budget is a concern (each teammate = full Claude instance)
 
-15. **PIV Configuration** (for projects using PIV loop)
+16. **PIV Configuration** (for projects using PIV loop)
     - Add the configuration block:
       ```markdown
       ## PIV Configuration
@@ -240,14 +292,14 @@ Create a `CLAUDE.md` file (or similar global rules file) following this structur
     - Add a manifest paragraph: "The framework tracks project state in `.agents/manifest.yaml`. All PIV commands read and write to this file — phase progress, profile freshness, coverage gaps, and next-action recommendations. `/prime` builds and reconciles the manifest; other commands update it after producing artifacts."
     - Add context window pairings: Document which commands share a session before clearing. This enables the orchestrator to manage Claude Code sessions correctly.
 
-16. **Prompting & Reasoning Guidelines** (for projects using PIV loop)
+17. **Prompting & Reasoning Guidelines** (for projects using PIV loop)
     - Add the CoT styles table (zero-shot, few-shot, ToT, per-subtask)
     - Add the Terminal Reasoning Summary format (4-8 bullets)
     - Add the Reflection pattern description (terminal only, ✅/⚠️ format)
     - Add the Hook Block Format specification (key-value, regex-parseable)
     - Reference CLAUDE.md in piv-dev-kit for the canonical version of these guidelines
 
-17. **Manifest Reference** (for projects using PIV loop)
+18. **Manifest Reference** (for projects using PIV loop)
     - Document what `.agents/manifest.yaml` tracks and its purpose:
       ```markdown
       ## Manifest Reference
@@ -291,7 +343,7 @@ Create a `CLAUDE.md` file (or similar global rules file) following this structur
       When `/prime` flags stale profiles → run `/research-stack --refresh` → profiles updated with fresh timestamps → `/prime` reports clean status on next run.
       ```
 
-18. **Failure Intelligence Reference** (for projects using PIV loop)
+19. **Failure Intelligence Reference** (for projects using PIV loop)
     - Document the error taxonomy, checkpointing, and structured error handling:
       ```markdown
       ## Failure Intelligence
@@ -351,7 +403,7 @@ Create a `CLAUDE.md` file (or similar global rules file) following this structur
       - Resolved checkpoint → historical, no action needed
       ```
 
-19. **Pre-Flight & Credential Management** (for projects using PIV loop)
+20. **Pre-Flight & Credential Management** (for projects using PIV loop)
     - Document the `/preflight` command and its role in the autonomous workflow
     - Explain that all credentials are verified BEFORE autonomous execution begins
     - Document the notification mechanism for mid-execution credential failures
@@ -365,7 +417,7 @@ Create a `CLAUDE.md` file (or similar global rules file) following this structur
       ```
     - Only `integration_auth` errors are always blocking — the agent cannot fix credentials
 
-20. **Orchestrator Interface** (for projects using PIV loop with autonomous orchestration)
+21. **Orchestrator Interface** (for projects using PIV loop with autonomous orchestration)
     - Document the command execution sequence the orchestrator follows
     - Document context window pairings (which commands share a session)
     - Document the manifest as the sole decision interface:
@@ -447,6 +499,7 @@ Self-critique (terminal only):
 - Does it cover the PIV philosophy and prompting guidelines?
 - Are code examples drawn from the actual codebase (not generic)?
 - Is it within 100-500 lines?
+- Does it include the Live Integration Testing Protocol for projects with external APIs?
 
 ### PIV-Automator-Hooks
 
@@ -458,6 +511,7 @@ rules_status: generated
 includes_teams_playbook: [true|false]
 includes_piv_config: [true|false]
 includes_reasoning_guidelines: [true|false]
+includes_live_testing_protocol: [true|false]
 next_suggested_command: create-prd
 next_arg: ""
 confidence: [high|medium|low]

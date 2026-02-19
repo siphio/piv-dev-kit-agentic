@@ -15,6 +15,7 @@ This is a **meta-project** - a collection of Claude Code slash commands that imp
 3. **Self-contained phases** - Each PRD phase must work standalone after `/clear` + `/prime`
 4. **Line discipline** - PRDs: 500-750 lines, Plans: 500-750 lines. No exceptions.
 5. **Self-validation** - The framework validates decisions against PRD criteria before implementation
+6. **⛔ ANTHROPIC_API_KEY NEVER** - The PIV orchestrator uses OAuth via Claude CLI subprocess (Claude Max subscription). `ANTHROPIC_API_KEY` must NEVER appear in `.env`, `.env.example`, config files, settings dataclasses, conftest fixtures, or generated code. No `sk-ant-*` keys anywhere. This applies to all commands this framework generates and all projects that use them.
 
 ## 3. Terminal Output Standards
 

@@ -252,6 +252,9 @@ So that <benefit/value>
 - Find similar test examples for reference
 - Understand test organization (unit vs integration)
 - Note coverage requirements and testing standards
+- Check for existing `tests/integration/` or `tests/live/` directory
+- Check for existing `.agents/fixtures/` with recorded API responses
+- Identify conftest.py patterns: separate mock fixtures (unit) vs live fixtures (integration)
 
 **5. Integration Points**
 
@@ -292,6 +295,18 @@ So that <benefit/value>
    - For agent-based features: Verify that technology capabilities support decision trees in PRD Section 4.2
    - Identify where agent must fallback or retry based on technology limitations
    - Document decision criteria that depend on technology responses
+
+5. **Extract Validation Hooks (Section 9)**
+   - For each relevant technology profile, read Section 9: Live Integration Testing Specification
+   - Catalog all endpoints by testing tier:
+     - Tier 1: health check commands, expected response schemas
+     - Tier 2: test data endpoints, cleanup procedures, required env vars
+     - Tier 3: cost estimates, fixture save paths, approval context
+     - Tier 4: fixture files, mock strategies
+   - Record test environment configuration from Section 9.2 (required env vars)
+   - Record testing sequence from Section 9.3 (order of tier execution)
+   - These become the source material for the VALIDATION COMMANDS section
+   - If a profile lacks Section 9: WARN — "Profile {name} missing Section 9. Live testing for this technology will be incomplete."
 
 ### Phase 4: External Research & Supplementary Documentation
 
@@ -399,6 +414,14 @@ So that <benefit/value>
   - Critical constraints: [rate limits, timeout, etc]
 
 - [Continue for each technology profile read]
+
+**Validation Hooks (from Section 9):**
+- `{technology-name}`:
+  - Tier 1: [endpoints + health check commands]
+  - Tier 2: [endpoints + test data + cleanup]
+  - Tier 3: [endpoints + cost + fixture paths]
+  - Tier 4: [endpoints + fixture files]
+  - Env vars: [from Section 9.2]
 
 **Impact on Implementation:**
 [How the technology capabilities/constraints shape this feature's design]
@@ -599,6 +622,14 @@ Design unit tests with fixtures and assertions following existing testing approa
 
 <Scope and requirements based on project standards>
 
+**Live integration tests (MANDATORY if technology profiles have Section 9):**
+- Create `tests/integration/` directory with live test files
+- Tier 1-2: Load credentials from `.env`, call real APIs, validate response schemas
+- Tier 3: Same, plus save responses to `.agents/fixtures/`
+- Tier 4: Load fixtures, feed to agent processing logic
+- Integration conftest.py loads env vars and provides live API client fixtures
+- Unit conftest.py provides mock fixtures — SEPARATE from integration conftest
+
 **[If agent feature]** Include tests that verify decision tree outcomes match PRD Section 4.2
 
 ### Edge Cases
@@ -611,39 +642,64 @@ Design unit tests with fixtures and assertions following existing testing approa
 
 ## VALIDATION COMMANDS
 
-<Define validation commands based on project's tools discovered in Phase 2>
-
-Execute every command to ensure zero regressions and 100% feature correctness.
+> Source: project tools (Phase 2) + technology profile Section 9 validation hooks (Phase 3 Step 5).
+> Execute every command. Tier 1-3 use REAL APIs with REAL credentials from `.env`.
 
 ### Level 1: Syntax & Style
+```bash
+# [Project-specific type checking / linting / formatting]
+```
+**Expected**: All pass with exit code 0
+
+### Level 2: Unit Tests (Mocked — Offline)
+```bash
+# [Project-specific unit test command — runs with mock fixtures, zero network calls]
+```
+**Expected**: All pass. No live API calls.
+
+### Level 3: Live API Tests — Tier 1 & 2 (Auto-Run)
+
+> **Source**: Technology profile Section 9.1 (Tier 1 and Tier 2 tables)
+> **No approval needed** — read-only health checks + controlled test data with cleanup.
+
+For EACH technology profile consumed by this feature, extract and list:
+
+**[Technology Name] — Tier 1 (Health Checks):**
+```bash
+# [Actual command from profile Section 9.1 Tier 1]
+```
+Expected: Auth valid. Service reachable. Response matches schema.
+
+**[Technology Name] — Tier 2 (Test Data):**
+```bash
+# [Actual command from profile Section 9.1 Tier 2]
+```
+Cleanup: [command from profile]
+Required env vars: [from profile Section 9.2]
+
+### Level 4: Live API Tests — Tier 3 (Auto-Approved After Preflight)
+
+> **Source**: Technology profile Section 9.1 (Tier 3 table)
+> Credentials verified by `/preflight`. Responses saved to `.agents/fixtures/`.
+
+**[Technology Name] — Tier 3 ([Operation]):**
+```bash
+# [Actual command from profile Section 9.1 Tier 3]
+```
+Cost: [from profile]
+Fixture: `.agents/fixtures/[tech]-[endpoint].json`
+
+### Level 5: Mock-Only Tests — Tier 4
+
+> **Source**: Technology profile Section 9.1 (Tier 4 table)
+> Never live — uses fixtures from `.agents/fixtures/`.
 
 ```bash
-# TypeScript type checking
-npm run type-check
-
-# ESLint (must pass with 0 errors)
-npm run lint
-
-# Prettier formatting check
-npm run format:check
+# [Command loading fixture data into agent logic]
 ```
+Fixture: `.agents/fixtures/[tech]-[endpoint].json`
 
-**Expected**: All commands pass with exit code 0
-
-### Level 2: Unit Tests
-
-<Project-specific unit test commands>
-
-### Level 3: Integration Tests
-
-<Project-specific integration test commands>
-
-### Level 4: Manual Validation
-
-<Feature-specific manual testing steps - API calls, UI testing, PRD scenario verification, etc.>
-
-### Level 5: Additional Validation (Optional)
-
+### Level 6: Additional Validation (Optional)
 <MCP servers or additional CLI tools if available>
 
 ---
@@ -772,6 +828,7 @@ checkpoint: none
 - [ ] Gotchas and anti-patterns captured
 - [ ] Every task has executable validation command
 - [ ] Technology profiles integrated and referenced in tasks
+- [ ] Technology profile Section 9 validation hooks extracted and mapped to VALIDATION COMMANDS
 
 ### Implementation Ready ✓
 

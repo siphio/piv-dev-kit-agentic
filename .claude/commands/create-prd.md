@@ -226,6 +226,8 @@ Define 8-15 scenarios covering:
 |---------|----------|------|---------|
 | [Name] | [REST/GraphQL/SDK] | [API key/OAuth] | [What agent uses it for] |
 
+**⛔ Auth exclusion:** If the project uses the PIV orchestrator / Claude Agent SDK, do NOT list `ANTHROPIC_API_KEY` as a required credential. The orchestrator spawns the `claude` CLI as a subprocess which handles its own auth via OAuth token (Claude Max subscription). No Anthropic API key is needed anywhere in the project.
+
 ---
 
 ### **8. MVP Scope** (30-40 lines)
