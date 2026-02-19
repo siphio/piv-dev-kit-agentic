@@ -3,23 +3,21 @@
 import { basename } from "node:path";
 import type { OrchestratorConfig, PivCommand, TelegramConfig } from "./types.js";
 
-const SESSION_DEFAULTS: Record<PivCommand, { maxTurns: number; maxBudgetUsd: number }> = {
-  "prime":                    { maxTurns: 30,  maxBudgetUsd: 1.00 },
-  "plan-feature":             { maxTurns: 100, maxBudgetUsd: 8.00 },
-  "execute":                  { maxTurns: 200, maxBudgetUsd: 15.00 },
-  "validate-implementation":  { maxTurns: 100, maxBudgetUsd: 5.00 },
-  "commit":                   { maxTurns: 10,  maxBudgetUsd: 0.50 },
-  "research-stack":           { maxTurns: 100, maxBudgetUsd: 5.00 },
+const SESSION_DEFAULTS: Record<PivCommand, { maxTurns: number; maxBudgetUsd: number; timeoutMs: number }> = {
+  "prime":                    { maxTurns: 30,  maxBudgetUsd: 1.00,  timeoutMs: 10 * 60_000 },   // 10 min
+  "plan-feature":             { maxTurns: 100, maxBudgetUsd: 8.00,  timeoutMs: 45 * 60_000 },   // 45 min
+  "execute":                  { maxTurns: 200, maxBudgetUsd: 15.00, timeoutMs: 60 * 60_000 },   // 60 min
+  "validate-implementation":  { maxTurns: 100, maxBudgetUsd: 5.00,  timeoutMs: 30 * 60_000 },   // 30 min
+  "commit":                   { maxTurns: 10,  maxBudgetUsd: 0.50,  timeoutMs: 5 * 60_000 },    //  5 min
+  "research-stack":           { maxTurns: 100, maxBudgetUsd: 5.00,  timeoutMs: 30 * 60_000 },   // 30 min
 };
 
 export function loadConfig(): OrchestratorConfig {
+  // The Agent SDK spawns `claude` as a subprocess which handles its own auth.
+  // CLAUDE_CODE_OAUTH_TOKEN is not required — the CLI uses its configured credentials.
   const hasOAuthToken = !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
-
   if (!hasOAuthToken) {
-    throw new Error(
-      "No OAuth token found. Set CLAUDE_CODE_OAUTH_TOKEN to use your Anthropic subscription.\n" +
-      "Generate via: claude setup-token"
-    );
+    console.log("ℹ️  CLAUDE_CODE_OAUTH_TOKEN not set — using claude CLI's own auth");
   }
 
   const projectDir = process.env.PIV_PROJECT_DIR || process.cwd();
@@ -49,6 +47,6 @@ export function loadConfig(): OrchestratorConfig {
   return { projectDir, model, hasOAuthToken, telegram, mode, registryEnabled };
 }
 
-export function getSessionDefaults(command: PivCommand): { maxTurns: number; maxBudgetUsd: number } {
+export function getSessionDefaults(command: PivCommand): { maxTurns: number; maxBudgetUsd: number; timeoutMs: number } {
   return SESSION_DEFAULTS[command];
 }

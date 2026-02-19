@@ -6,7 +6,7 @@ import type { SessionConfig, SessionResult, PivCommand } from "./types.js";
 import { getSessionDefaults } from "./config.js";
 import { processSession } from "./response-handler.js";
 
-const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+const FALLBACK_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes — only used when no per-command timeout
 
 const ALL_TOOLS = [
   "Read", "Glob", "Grep", "Bash", "Edit", "Write",
@@ -15,8 +15,9 @@ const ALL_TOOLS = [
 
 function buildOptions(config: SessionConfig, projectDir: string) {
   const controller = new AbortController();
-  const timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = config.timeoutMs ?? FALLBACK_TIMEOUT_MS;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  console.log(`  Timeout: ${Math.round(timeoutMs / 60_000)} minutes`);
 
   // Unset CLAUDECODE to prevent nesting guard when orchestrator runs inside
   // a Claude Code session (e.g. spawned via /go or during development).
@@ -51,15 +52,25 @@ export async function createSession(config: SessionConfig): Promise<SessionResul
     const gen = query({ prompt: config.prompt, options });
     return await processSession(gen);
   } catch (err: unknown) {
-    if (err instanceof Error && err.name === "AbortError") {
+    const msg = err instanceof Error ? err.message : String(err);
+    // The SDK reports abort as "aborted by user" (not a JS AbortError).
+    // This happens when our AbortController fires or when the subprocess is killed.
+    const isAbort = err instanceof Error && (
+      err.name === "AbortError" ||
+      msg.includes("aborted by user") ||
+      msg.includes("aborted")
+    );
+    if (isAbort) {
+      const timeoutMs = config.timeoutMs ?? FALLBACK_TIMEOUT_MS;
+      console.log(`  ⏰ Session aborted after ${Math.round(timeoutMs / 60_000)} minutes`);
       return {
         sessionId: "",
         output: "",
         hooks: {},
         costUsd: 0,
-        durationMs: config.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+        durationMs: timeoutMs,
         turns: 0,
-        error: { type: "abort_timeout", messages: ["Session timed out"] },
+        error: { type: "abort_timeout", messages: [`Session timed out after ${Math.round(timeoutMs / 60_000)} minutes`] },
       };
     }
     throw err;
@@ -100,6 +111,7 @@ export async function runCommandPairing(
       cwd: projectDir,
       maxTurns: defaults.maxTurns,
       maxBudgetUsd: defaults.maxBudgetUsd,
+      timeoutMs: defaults.timeoutMs,
       resumeSessionId: currentSessionId,
     };
 
