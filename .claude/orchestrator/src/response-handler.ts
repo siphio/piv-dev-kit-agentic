@@ -1,0 +1,74 @@
+// PIV Orchestrator — SDK Response Stream Handler
+
+import type { SessionResult, SessionError } from "./types.js";
+import { parseHooks } from "./hooks-parser.js";
+
+/**
+ * Process an AsyncIterable of SDK messages into a structured SessionResult.
+ *
+ * Handles message types:
+ * - system/init: captures session_id, logs model and tools
+ * - assistant: accumulates text from content blocks
+ * - system/compact_boundary: logs context compaction warning
+ * - result/success: captures final output, cost, duration, turns
+ * - result/error_*: captures error with subtype and messages
+ */
+export async function processSession(
+  generator: AsyncIterable<any>
+): Promise<SessionResult> {
+  let sessionId = "";
+  let accumulatedText = "";
+  let output = "";
+  let costUsd = 0;
+  let durationMs = 0;
+  let turns = 0;
+  let error: SessionError | undefined;
+
+  for await (const message of generator) {
+    if (message.type === "system") {
+      if (message.subtype === "init") {
+        sessionId = message.session_id ?? "";
+        console.log(`  Session initialized (id: ${sessionId}, model: ${message.model ?? "unknown"})`);
+      } else if (message.subtype === "compact_boundary") {
+        console.log("  ⚠️ Context compaction occurred — some early context may be summarized");
+      }
+    }
+
+    if (message.type === "assistant" && message.message?.content) {
+      for (const block of message.message.content) {
+        if ("text" in block) {
+          accumulatedText += block.text + "\n";
+        }
+      }
+    }
+
+    if (message.type === "result") {
+      costUsd = message.total_cost_usd ?? 0;
+      durationMs = message.duration_ms ?? 0;
+      turns = message.num_turns ?? 0;
+
+      if (message.subtype === "success") {
+        output = message.result ?? accumulatedText;
+      } else {
+        // Error result: error_max_turns, error_during_execution, error_max_budget_usd, etc.
+        error = {
+          type: message.subtype ?? "unknown_error",
+          messages: message.errors ?? [],
+        };
+        output = accumulatedText;
+      }
+    }
+  }
+
+  const hooks = parseHooks(output);
+
+  return {
+    sessionId,
+    output,
+    hooks,
+    costUsd,
+    durationMs,
+    turns,
+    error,
+  };
+}
