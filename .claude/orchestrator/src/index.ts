@@ -57,7 +57,7 @@ async function main(): Promise<void> {
   const projectDir = cliArgs.projectDir ?? config.projectDir;
 
   console.log(`📁 Project: ${projectDir}`);
-  console.log(`🔑 Auth: ${config.hasOAuthToken ? "OAuth (subscription)" : "API Key (pay-per-token)"}`);
+  console.log(`🔑 Auth: OAuth (subscription via CLAUDE_CODE_OAUTH_TOKEN)`);
   console.log(`🧠 Model: ${config.model}`);
   console.log(`📡 Mode: ${config.mode}`);
 

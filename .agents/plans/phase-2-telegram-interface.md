@@ -42,7 +42,7 @@ Add a grammY-based Telegram bot embedded in the orchestrator process. It uses lo
 
 - `claude-agent-sdk-profile.md` — Used for: PRD relay sessions
   - Key endpoints: query() with resume for multi-turn PRD conversations
-  - Auth method: ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN
+  - Auth method: CLAUDE_CODE_OAUTH_TOKEN (subscription billing via Agent SDK subprocess)
   - Critical constraints: each query() spawns subprocess, settingSources: ["project"] required
 
 ---

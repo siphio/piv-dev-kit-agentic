@@ -51,7 +51,7 @@ notifications:
     severity: critical
     category: integration_auth
     phase: 0
-    details: "Pre-flight: 2 credentials missing — ANTHROPIC_API_KEY (Phase 1+), TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID (Phase 2+). No .env file found."
+    details: "Pre-flight: 2 credentials missing — CLAUDE_CODE_OAUTH_TOKEN (Phase 1+), TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID (Phase 2+). No .env file found."
     blocking: true
     action_taken: "Waiting for credentials before starting autonomous execution"
     acknowledged: true

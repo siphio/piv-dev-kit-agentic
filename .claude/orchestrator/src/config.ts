@@ -14,11 +14,11 @@ const SESSION_DEFAULTS: Record<PivCommand, { maxTurns: number; maxBudgetUsd: num
 
 export function loadConfig(): OrchestratorConfig {
   const hasOAuthToken = !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
-  const hasApiKey = !!process.env.ANTHROPIC_API_KEY;
 
-  if (!hasOAuthToken && !hasApiKey) {
+  if (!hasOAuthToken) {
     throw new Error(
-      "No authentication token found. Set CLAUDE_CODE_OAUTH_TOKEN (subscription) or ANTHROPIC_API_KEY (pay-per-token)."
+      "No OAuth token found. Set CLAUDE_CODE_OAUTH_TOKEN to use your Anthropic subscription.\n" +
+      "Generate via: claude setup-token"
     );
   }
 
@@ -44,7 +44,7 @@ export function loadConfig(): OrchestratorConfig {
     console.log("⚠️ Both TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID required — Telegram disabled");
   }
 
-  return { projectDir, model, hasOAuthToken, hasApiKey, telegram, mode };
+  return { projectDir, model, hasOAuthToken, telegram, mode };
 }
 
 export function getSessionDefaults(command: PivCommand): { maxTurns: number; maxBudgetUsd: number } {

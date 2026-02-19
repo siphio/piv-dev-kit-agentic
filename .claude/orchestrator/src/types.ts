@@ -216,7 +216,6 @@ export interface OrchestratorConfig {
   projectDir: string;
   model: string;
   hasOAuthToken: boolean;
-  hasApiKey: boolean;
   telegram?: TelegramConfig;
   mode: OrchestratorMode;
 }
