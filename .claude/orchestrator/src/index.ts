@@ -6,6 +6,11 @@ import { readManifest, writeManifest, appendFailure } from "./manifest-manager.j
 import { determineNextAction } from "./state-machine.js";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { Bot } from "grammy";
+import { TelegramNotifier } from "./telegram-notifier.js";
+import { PrdRelay } from "./prd-relay.js";
+import { createBot, registerBotCommands } from "./telegram-bot.js";
+import type { OrchestratorControls } from "./telegram-bot.js";
 
 interface CliArgs {
   projectDir?: string;
@@ -30,6 +35,18 @@ function parseArgs(argv: string[]): CliArgs {
   return args;
 }
 
+/**
+ * Create a pause check function that blocks while paused.
+ * Polls every 2 seconds until the paused flag is cleared.
+ */
+function createPauseCheck(state: { paused: boolean }): () => Promise<void> {
+  return async () => {
+    while (state.paused) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  };
+}
+
 async function main(): Promise<void> {
   console.log("🤖 PIV Orchestrator v0.1.0\n");
 
@@ -42,6 +59,7 @@ async function main(): Promise<void> {
   console.log(`📁 Project: ${projectDir}`);
   console.log(`🔑 Auth: ${config.hasOAuthToken ? "OAuth (subscription)" : "API Key (pay-per-token)"}`);
   console.log(`🧠 Model: ${config.model}`);
+  console.log(`📡 Mode: ${config.mode}`);
 
   // Verify manifest exists
   const manifestPath = join(projectDir, ".agents/manifest.yaml");
@@ -53,7 +71,7 @@ async function main(): Promise<void> {
 
   const manifest = await readManifest(projectDir);
 
-  // Dry run mode: show recommendation and exit
+  // Dry run mode: show recommendation and exit (no bot needed)
   if (cliArgs.dryRun) {
     const action = determineNextAction(manifest);
     console.log("\n📋 Dry Run — Recommended Next Action:");
@@ -64,15 +82,78 @@ async function main(): Promise<void> {
     return;
   }
 
+  // --- Telegram Setup (optional) ---
+  let notifier: TelegramNotifier | undefined;
+  let bot: Bot | undefined;
+  let prdRelay: PrdRelay | undefined;
+  const state = { running: false, paused: false };
+  let pauseCheck: (() => Promise<void>) | undefined;
+
+  if (config.telegram) {
+    console.log(`\n📱 Telegram: enabled (chat: ${config.telegram.chatId}, prefix: ${config.telegram.projectPrefix})`);
+
+    bot = new Bot(config.telegram.botToken);
+    notifier = new TelegramNotifier(bot, config.telegram.chatId, config.telegram.projectPrefix);
+    prdRelay = new PrdRelay(projectDir, notifier);
+    pauseCheck = createPauseCheck(state);
+
+    const controls: OrchestratorControls = {
+      getManifest: () => readManifest(projectDir),
+      startExecution: () => {
+        if (state.running) return;
+        state.running = true;
+        state.paused = false;
+        // Trigger execution asynchronously — don't block the bot handler
+        runAllPhases(projectDir, notifier, pauseCheck).finally(() => {
+          state.running = false;
+        });
+      },
+      pause: () => { state.paused = true; },
+      resume: () => { state.paused = false; },
+      isRunning: () => state.running,
+      isPaused: () => state.paused,
+      startPrdRelay: (_chatId: number) => {
+        prdRelay!.startConversation().catch((err) => {
+          console.log(`  ⚠️ PRD relay start failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
+      },
+      isPrdRelayActive: () => prdRelay!.isActive(),
+      handlePrdMessage: (text: string) => prdRelay!.handleUserMessage(text),
+      endPrdRelay: () => prdRelay!.endConversation(),
+      projectDir,
+    };
+
+    const telegramBot = createBot(config.telegram, controls, notifier);
+
+    // Graceful shutdown
+    const shutdown = () => {
+      console.log("\n🛑 Shutting down...");
+      telegramBot.stop();
+      process.exit(0);
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
+
+    // Register commands and start polling (non-blocking)
+    await registerBotCommands(telegramBot);
+    telegramBot.start();
+    console.log("  🤖 Telegram bot polling started");
+
+    bot = telegramBot;
+  }
+
   // Execute
   try {
+    state.running = true;
     if (cliArgs.phase !== undefined) {
       console.log(`\n🎯 Running Phase ${cliArgs.phase} only\n`);
-      await runPhase(cliArgs.phase, projectDir);
+      await runPhase(cliArgs.phase, projectDir, notifier, pauseCheck);
     } else {
-      await runAllPhases(projectDir);
+      await runAllPhases(projectDir, notifier, pauseCheck);
     }
+    state.running = false;
   } catch (err: unknown) {
+    state.running = false;
     const errorMsg = err instanceof Error ? err.message : String(err);
     console.error(`\n💥 Uncaught error: ${errorMsg}`);
 
@@ -93,6 +174,13 @@ async function main(): Promise<void> {
     } catch {
       console.error("  (Could not write failure to manifest)");
     }
+
+    await notifier?.sendEscalation(
+      cliArgs.phase ?? 0,
+      "partial_execution",
+      errorMsg,
+      "Orchestrator crashed — awaiting human intervention"
+    );
 
     console.error("\n## PIV-Error");
     console.error(`error_category: partial_execution`);

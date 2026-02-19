@@ -1,6 +1,7 @@
 // PIV Orchestrator — Environment Configuration
 
-import type { OrchestratorConfig, PivCommand } from "./types.js";
+import { basename } from "node:path";
+import type { OrchestratorConfig, PivCommand, TelegramConfig } from "./types.js";
 
 const SESSION_DEFAULTS: Record<PivCommand, { maxTurns: number; maxBudgetUsd: number }> = {
   "prime":                    { maxTurns: 30,  maxBudgetUsd: 1.00 },
@@ -24,7 +25,26 @@ export function loadConfig(): OrchestratorConfig {
   const projectDir = process.env.PIV_PROJECT_DIR || process.cwd();
   const model = process.env.PIV_MODEL || "claude-opus-4-6";
 
-  return { projectDir, model, hasOAuthToken, hasApiKey };
+  // Telegram configuration (optional)
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  const chatIdRaw = process.env.TELEGRAM_CHAT_ID;
+  let telegram: TelegramConfig | undefined;
+  let mode: "cli" | "telegram" = "cli";
+
+  if (botToken && chatIdRaw) {
+    const chatId = parseInt(chatIdRaw, 10);
+    if (isNaN(chatId)) {
+      console.log("⚠️ TELEGRAM_CHAT_ID is not a valid number — Telegram disabled");
+    } else {
+      const projectPrefix = process.env.TELEGRAM_PROJECT_PREFIX || basename(projectDir);
+      telegram = { botToken, chatId, projectPrefix };
+      mode = "telegram";
+    }
+  } else if (botToken || chatIdRaw) {
+    console.log("⚠️ Both TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID required — Telegram disabled");
+  }
+
+  return { projectDir, model, hasOAuthToken, hasApiKey, telegram, mode };
 }
 
 export function getSessionDefaults(command: PivCommand): { maxTurns: number; maxBudgetUsd: number } {

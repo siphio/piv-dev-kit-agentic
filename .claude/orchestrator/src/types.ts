@@ -187,6 +187,29 @@ export interface Manifest {
   last_updated: string;
 }
 
+// --- Telegram Types ---
+
+export interface TelegramConfig {
+  botToken: string;
+  chatId: number;
+  projectPrefix: string;
+}
+
+export interface ApprovalRequest {
+  techName: string;
+  endpoint: string;
+  cost: string;
+  effect: string;
+  cleanup: string;
+}
+
+export interface ApprovalResult {
+  action: "approve" | "fixture" | "skip";
+  techName: string;
+}
+
+export type OrchestratorMode = "cli" | "telegram";
+
 // --- Config Types ---
 
 export interface OrchestratorConfig {
@@ -194,4 +217,6 @@ export interface OrchestratorConfig {
   model: string;
   hasOAuthToken: boolean;
   hasApiKey: boolean;
+  telegram?: TelegramConfig;
+  mode: OrchestratorMode;
 }

@@ -21,6 +21,7 @@ import type {
   Manifest,
   PivCommand,
 } from "./types.js";
+import type { TelegramNotifier } from "./telegram-notifier.js";
 
 // --- Command Pairings (from CLAUDE.md Context Window Pairings) ---
 
@@ -86,7 +87,12 @@ function formatPivError(
  * Run a single phase through the full PIV loop.
  * Handles plan → execute → validate → commit with retry logic.
  */
-export async function runPhase(phase: number, projectDir: string): Promise<void> {
+export async function runPhase(
+  phase: number,
+  projectDir: string,
+  notifier?: TelegramNotifier,
+  pauseCheck?: () => Promise<void>
+): Promise<void> {
   let manifest = await readManifest(projectDir);
   const phaseStatus = manifest.phases[phase];
 
@@ -95,6 +101,7 @@ export async function runPhase(phase: number, projectDir: string): Promise<void>
     return;
   }
 
+  await notifier?.sendPhaseStart(phase, `Phase ${phase}`);
   const totalCost = { usd: 0 };
 
   // --- Plan ---
@@ -106,7 +113,7 @@ export async function runPhase(phase: number, projectDir: string): Promise<void>
     totalCost.usd += results.reduce((sum, r) => sum + r.costUsd, 0);
 
     if (lastResult.error) {
-      await handleError(manifest, projectDir, "plan-feature", phase, lastResult, undefined);
+      await handleError(manifest, projectDir, "plan-feature", phase, lastResult, undefined, notifier);
       return;
     }
 
@@ -152,7 +159,7 @@ export async function runPhase(phase: number, projectDir: string): Promise<void>
     totalCost.usd += results.reduce((sum, r) => sum + r.costUsd, 0);
 
     if (lastResult.error) {
-      await handleError(manifest, projectDir, "execute", phase, lastResult, checkpointTag);
+      await handleError(manifest, projectDir, "execute", phase, lastResult, checkpointTag, notifier);
       return;
     }
 
@@ -206,7 +213,7 @@ export async function runPhase(phase: number, projectDir: string): Promise<void>
           continue;
         }
 
-        await handleError(manifest, projectDir, "validate-implementation", phase, lastResult, undefined);
+        await handleError(manifest, projectDir, "validate-implementation", phase, lastResult, undefined, notifier);
         return;
       }
 
@@ -218,7 +225,7 @@ export async function runPhase(phase: number, projectDir: string): Promise<void>
         retries++;
         if (retries > maxValidationRetries) {
           console.log(`  ❌ Validation failed after ${maxValidationRetries} retries`);
-          await handleError(manifest, projectDir, "validate-implementation", phase, lastResult, undefined);
+          await handleError(manifest, projectDir, "validate-implementation", phase, lastResult, undefined, notifier);
           return;
         }
       }
@@ -237,7 +244,7 @@ export async function runPhase(phase: number, projectDir: string): Promise<void>
   const commitResult = getLastResult(commitResults);
 
   if (commitResult.error) {
-    await handleError(manifest, projectDir, "commit", phase, commitResult, undefined);
+    await handleError(manifest, projectDir, "commit", phase, commitResult, undefined, notifier);
     return;
   }
 
@@ -249,13 +256,18 @@ export async function runPhase(phase: number, projectDir: string): Promise<void>
   }
   await writeManifest(projectDir, manifest);
 
+  await notifier?.sendPhaseComplete(phase, totalCost.usd);
   console.log(`\n🎉 Phase ${phase} complete! (total cost: $${totalCost.usd.toFixed(2)})`);
 }
 
 /**
  * Run all phases from the manifest sequentially.
  */
-export async function runAllPhases(projectDir: string): Promise<void> {
+export async function runAllPhases(
+  projectDir: string,
+  notifier?: TelegramNotifier,
+  pauseCheck?: () => Promise<void>
+): Promise<void> {
   let manifest = await readManifest(projectDir);
   const phases = Object.keys(manifest.phases)
     .map(Number)
@@ -266,6 +278,9 @@ export async function runAllPhases(projectDir: string): Promise<void> {
   let totalCost = 0;
 
   for (const phase of phases) {
+    // Check if paused before starting next phase
+    await pauseCheck?.();
+
     const status = manifest.phases[phase];
     if (
       status.plan === "complete" &&
@@ -280,7 +295,7 @@ export async function runAllPhases(projectDir: string): Promise<void> {
     console.log(`  Phase ${phase}`);
     console.log(`${"=".repeat(60)}`);
 
-    await runPhase(phase, projectDir);
+    await runPhase(phase, projectDir, notifier, pauseCheck);
 
     // Re-read manifest after phase (state may have changed)
     manifest = await readManifest(projectDir);
@@ -304,6 +319,8 @@ export async function runAllPhases(projectDir: string): Promise<void> {
   console.log(`${"=".repeat(60)}`);
   console.log(`Next action: ${nextAction.command} ${nextAction.argument ?? ""}`);
   console.log(`Reason: ${nextAction.reason}`);
+
+  await notifier?.sendText("✅ <b>All phases complete!</b>");
 }
 
 // --- Error Handling ---
@@ -314,7 +331,8 @@ async function handleError(
   command: PivCommand,
   phase: number,
   result: SessionResult,
-  checkpointTag: string | undefined
+  checkpointTag: string | undefined,
+  notifier?: TelegramNotifier
 ): Promise<void> {
   const errorText = result.error?.messages.join("; ") ?? "Unknown error";
   const category = classifyError(errorText, command);
@@ -353,6 +371,7 @@ async function handleError(
   if (taxonomy.needsHuman) {
     // integration_auth, prd_gap — escalate immediately with blocking notification
     failure.resolution = "escalated_blocking";
+    await notifier?.sendEscalation(phase, category, errorText, `Escalated immediately — ${taxonomy.recoveryAction}`);
     manifest = appendNotification(manifest, {
       timestamp: new Date().toISOString(),
       type: "escalation",
