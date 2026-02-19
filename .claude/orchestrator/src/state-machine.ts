@@ -4,16 +4,36 @@ import type {
   Manifest,
   NextAction,
   FailureEntry,
+  FailureSeverity,
   CheckpointEntry,
   PhaseStatus,
 } from "./types.js";
+import { getSeverity } from "./error-classifier.js";
+
+const SEVERITY_ORDER: Record<FailureSeverity, number> = {
+  blocking: 3,
+  degraded: 2,
+  advisory: 1,
+};
 
 /**
  * Find the first pending failure (resolution === "pending").
+ * When minSeverity is provided, only returns failures at that severity or higher.
  */
-export function findPendingFailure(manifest: Manifest): FailureEntry | null {
+export function findPendingFailure(
+  manifest: Manifest,
+  minSeverity?: FailureSeverity
+): FailureEntry | null {
   if (!manifest.failures) return null;
-  return manifest.failures.find((f) => f.resolution === "pending") ?? null;
+
+  return manifest.failures.find((f) => {
+    if (f.resolution !== "pending") return false;
+    if (minSeverity) {
+      const failureSeverity = getSeverity(f.error_category);
+      return SEVERITY_ORDER[failureSeverity] >= SEVERITY_ORDER[minSeverity];
+    }
+    return true;
+  }) ?? null;
 }
 
 /**

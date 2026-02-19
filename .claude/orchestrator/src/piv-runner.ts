@@ -12,14 +12,20 @@ import {
   setNextAction,
 } from "./manifest-manager.js";
 import { determineNextAction, findPendingFailure, findActiveCheckpoint, getNextUnfinishedPhase } from "./state-machine.js";
-import { classifyError, getTaxonomy, canRetry } from "./error-classifier.js";
+import { classifyError, getTaxonomy, canRetry, getSeverity } from "./error-classifier.js";
 import { createCheckpoint, rollbackToCheckpoint } from "./git-manager.js";
+import { createProgressCallback } from "./progress-tracker.js";
+import { scoreContext, isContextSufficient, formatContextScore } from "./context-scorer.js";
+import { checkFidelity, formatFidelityReport } from "./fidelity-checker.js";
+import { runRegressionTests } from "./drift-detector.js";
 import type {
   SessionResult,
   FailureEntry,
   CheckpointEntry,
   Manifest,
   PivCommand,
+  BudgetContext,
+  ProgressCallback,
 } from "./types.js";
 import type { TelegramNotifier } from "./telegram-notifier.js";
 
@@ -190,7 +196,9 @@ async function runPreLoop(
 
 /**
  * Run a single phase through the full PIV loop.
- * Handles plan → execute → validate → commit with retry logic.
+ * Pipeline: plan → execute → fidelity check → drift detection → validate → commit
+ * With progress visibility (F1), adaptive budgets (F2), smart failure handling (F3),
+ * context scoring (F4), drift detection (F5), and fidelity checking (F6).
  */
 export async function runPhase(
   phase: number,
@@ -212,10 +220,22 @@ export async function runPhase(
   // --- Plan ---
   if (phaseStatus.plan !== "complete") {
     console.log(`\n🗺️  Phase ${phase} — Planning`);
+    const { callback: progressCb } = createProgressCallback(notifier, phase, "plan-feature");
     const pairing = planPairing(phase, `Phase ${phase}`);
-    const results = await runCommandPairing(pairing.commands, projectDir, pairing.type);
+    const budgetCtx: BudgetContext = { command: "plan-feature", projectDir, phase, manifest };
+    const results = await runCommandPairing(pairing.commands, projectDir, pairing.type, progressCb, budgetCtx);
     const lastResult = getLastResult(results);
     totalCost.usd += results.reduce((sum, r) => sum + r.costUsd, 0);
+
+    // F4: Score context quality from /prime output
+    if (results.length > 1) {
+      const primeResult = results[0];
+      const ctxScore = scoreContext(primeResult.output, manifest, phase);
+      console.log(formatContextScore(ctxScore));
+      if (!isContextSufficient(ctxScore)) {
+        console.log("  Context score below threshold — proceeding anyway");
+      }
+    }
 
     if (lastResult.error) {
       await handleError(manifest, projectDir, "plan-feature", phase, lastResult, undefined, notifier);
@@ -258,10 +278,19 @@ export async function runPhase(
       return;
     }
 
+    const { callback: progressCb } = createProgressCallback(notifier, phase, "execute");
+    const budgetCtx: BudgetContext = { command: "execute", projectDir, phase, manifest };
     const pairing = executePairing(planPath);
-    const results = await runCommandPairing(pairing.commands, projectDir, pairing.type);
+    const results = await runCommandPairing(pairing.commands, projectDir, pairing.type, progressCb, budgetCtx);
     const lastResult = getLastResult(results);
     totalCost.usd += results.reduce((sum, r) => sum + r.costUsd, 0);
+
+    // F4: Score context quality from /prime output
+    if (results.length > 1) {
+      const primeResult = results[0];
+      const ctxScore = scoreContext(primeResult.output, manifest, phase);
+      console.log(formatContextScore(ctxScore));
+    }
 
     if (lastResult.error) {
       await handleError(manifest, projectDir, "execute", phase, lastResult, checkpointTag, notifier);
@@ -282,6 +311,53 @@ export async function runPhase(
     });
     await writeManifest(projectDir, manifest);
     console.log(`  ✅ Phase ${phase} execution complete`);
+
+    // --- F6: Fidelity Check ---
+    if (planPath) {
+      console.log(`\n📐 Phase ${phase} — Fidelity check`);
+      try {
+        const fidelity = checkFidelity(projectDir, planPath, phase);
+        console.log(formatFidelityReport(fidelity));
+        if (fidelity.fidelityScore < 50) {
+          console.log("  ⚠️ Low fidelity — execution may have diverged from plan");
+        }
+      } catch (err) {
+        console.log(`  ⚠️ Fidelity check failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // --- F5: Drift Detection ---
+    if (phase > 1) {
+      console.log(`\n🔬 Phase ${phase} — Drift check (running Phase 1..${phase - 1} tests)`);
+      try {
+        const drift = runRegressionTests(projectDir, phase, manifest);
+        if (drift.regressionDetected) {
+          console.log(`  ⚠️ Regression: ${drift.testsFailed} tests failed`);
+          // Spawn fix session
+          const { callback: fixCb } = createProgressCallback(notifier, phase, "fix-regression");
+          await runCommandPairing(
+            ["/prime", `Fix regression in prior-phase tests: ${drift.failedTests.join(", ")}`],
+            projectDir,
+            "execute",
+            fixCb,
+            { command: "execute", projectDir, phase, manifest }
+          );
+          // Re-check after fix
+          const recheck = runRegressionTests(projectDir, phase, manifest);
+          if (recheck.regressionDetected) {
+            console.log(`  ⚠️ Regression persists (${recheck.testsFailed} tests) — logging as advisory, continuing`);
+          } else if (recheck.testsRun > 0) {
+            console.log(`  ✅ Regression fixed — all ${recheck.testsRun} prior-phase tests pass`);
+          }
+        } else if (drift.testsRun > 0) {
+          console.log(`  ✅ All ${drift.testsRun} prior-phase tests passed`);
+        } else {
+          console.log(`  ℹ️ No prior-phase test directories found — skipping`);
+        }
+      } catch (err) {
+        console.log(`  ⚠️ Drift detection failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
   }
 
   // --- Validate ---
@@ -292,10 +368,19 @@ export async function runPhase(
     const maxValidationRetries = 2;
 
     while (!validated && retries <= maxValidationRetries) {
+      const { callback: progressCb } = createProgressCallback(notifier, phase, "validate");
+      const budgetCtx: BudgetContext = { command: "validate-implementation", projectDir, phase, manifest };
       const pairing = validatePairing();
-      const results = await runCommandPairing(pairing.commands, projectDir, pairing.type);
+      const results = await runCommandPairing(pairing.commands, projectDir, pairing.type, progressCb, budgetCtx);
       const lastResult = getLastResult(results);
       totalCost.usd += results.reduce((sum, r) => sum + r.costUsd, 0);
+
+      // F4: Score context quality from /prime output
+      if (results.length > 1) {
+        const primeResult = results[0];
+        const ctxScore = scoreContext(primeResult.output, manifest, phase);
+        console.log(formatContextScore(ctxScore));
+      }
 
       if (lastResult.error) {
         const category = classifyError(
@@ -309,10 +394,13 @@ export async function runPhase(
           retries++;
 
           // Spawn refactor session
+          const { callback: fixCb } = createProgressCallback(notifier, phase, "fix-validation");
           const refactorResults = await runCommandPairing(
             ["/prime", `Fix the following validation error and re-run tests: ${lastResult.error.messages.join("; ")}`],
             projectDir,
-            "execute"
+            "execute",
+            fixCb,
+            { command: "execute", projectDir, phase, manifest }
           );
           totalCost.usd += refactorResults.reduce((sum, r) => sum + r.costUsd, 0);
           continue;
@@ -342,15 +430,38 @@ export async function runPhase(
     console.log(`  ✅ Phase ${phase} validation passed`);
   }
 
-  // --- Commit ---
+  // --- Commit (F3: Smart failure handling) ---
   console.log(`\n📦 Phase ${phase} — Committing`);
-  const commitResults = await runCommandPairing(commitPairing().commands, projectDir, "commit");
+  const { callback: commitProgressCb } = createProgressCallback(notifier, phase, "commit");
+  const commitBudgetCtx: BudgetContext = { command: "commit", projectDir };
+  let commitResults = await runCommandPairing(commitPairing().commands, projectDir, "commit", commitProgressCb, commitBudgetCtx);
   totalCost.usd += commitResults.reduce((sum, r) => sum + r.costUsd, 0);
-  const commitResult = getLastResult(commitResults);
+  let commitResult = getLastResult(commitResults);
 
+  // F3: Smart commit retry — commit failures are always treated as degraded
   if (commitResult.error) {
-    await handleError(manifest, projectDir, "commit", phase, commitResult, undefined, notifier);
-    return;
+    const errorText = commitResult.error.messages.join("; ");
+    const category = classifyError(errorText, "commit");
+    const severity = getSeverity(category);
+
+    // Commit failures after validation passed are never blocking
+    console.log(`  ⚠️ Commit failed (${category}, severity: ${severity}) — retrying with increased budget`);
+    const retryBudgetCtx: BudgetContext = { command: "commit", projectDir };
+    const { callback: retryCb } = createProgressCallback(notifier, phase, "commit-retry");
+    commitResults = await runCommandPairing(commitPairing().commands, projectDir, "commit", retryCb, retryBudgetCtx);
+    totalCost.usd += commitResults.reduce((sum, r) => sum + r.costUsd, 0);
+    commitResult = getLastResult(commitResults);
+
+    if (commitResult.error) {
+      // Still failed — log but don't stop pipeline
+      console.log(`  ⚠️ Commit failed after retry — continuing to next phase`);
+      await handleError(manifest, projectDir, "commit", phase, commitResult, undefined, notifier);
+      // F3: Don't return — continue to next phase since validation passed
+    }
+  }
+
+  if (!commitResult.error) {
+    console.log(`  ✅ Phase ${phase} committed`);
   }
 
   // Resolve checkpoint
@@ -436,12 +547,17 @@ export async function runAllPhases(
     // Re-read manifest after phase (state may have changed)
     manifest = await readManifest(projectDir);
 
-    // Check for blocking failures
-    const failure = findPendingFailure(manifest);
-    if (failure) {
-      console.log(`\n🛑 Stopping — pending failure in phase ${failure.phase}: ${failure.details}`);
+    // F3: Only blocking failures stop the loop
+    const blockingFailure = findPendingFailure(manifest, "blocking");
+    if (blockingFailure) {
+      console.log(`\n🛑 Stopping — blocking failure in phase ${blockingFailure.phase}: ${blockingFailure.details}`);
       if (heartbeatInterval) clearInterval(heartbeatInterval);
       break;
+    }
+    // Log non-blocking failures but continue
+    const anyFailure = findPendingFailure(manifest);
+    if (anyFailure) {
+      console.log(`  ℹ️ Non-blocking failure in phase ${anyFailure.phase} (${anyFailure.error_category}) — continuing`);
     }
   }
 

@@ -1,6 +1,6 @@
 // PIV Orchestrator — Error Taxonomy Classifier
 
-import type { ErrorCategory, ErrorTaxonomyEntry, FailureEntry, PivCommand } from "./types.js";
+import type { ErrorCategory, ErrorTaxonomyEntry, FailureEntry, FailureSeverity, PivCommand } from "./types.js";
 
 const ERROR_TAXONOMY: Record<ErrorCategory, ErrorTaxonomyEntry> = {
   syntax_error:           { maxRetries: 2, needsHuman: false, recoveryAction: "auto-fix and retry" },
@@ -102,4 +102,44 @@ export function needsEscalation(failure: FailureEntry): boolean {
   const taxonomy = getTaxonomy(failure.error_category);
   if (taxonomy.needsHuman) return true;
   return failure.retry_count >= taxonomy.maxRetries;
+}
+
+// --- F3: Severity Tiers ---
+
+/**
+ * Map error categories to severity tiers.
+ *
+ * Tier 1 (blocking): Stop pipeline, escalate
+ * Tier 2 (degraded): Inline retry with bigger budget, continue if fixed
+ * Tier 3 (advisory): Log warning, continue
+ */
+export const SEVERITY_MAP: Record<ErrorCategory, FailureSeverity> = {
+  syntax_error: "blocking",
+  test_failure: "blocking",
+  scenario_mismatch: "blocking",
+  integration_auth: "blocking",
+  prd_gap: "blocking",
+  partial_execution: "blocking",
+  orchestrator_crash: "blocking",
+  manifest_corruption: "blocking",
+  integration_rate_limit: "degraded",
+  stale_artifact: "advisory",
+  line_budget_exceeded: "advisory",
+};
+
+/**
+ * Get the severity tier for an error category.
+ */
+export function getSeverity(category: ErrorCategory): FailureSeverity {
+  return SEVERITY_MAP[category] ?? "blocking";
+}
+
+/**
+ * Get extended taxonomy info including severity.
+ */
+export function getExtendedTaxonomy(category: ErrorCategory): ErrorTaxonomyEntry & { severity: FailureSeverity } {
+  return {
+    ...getTaxonomy(category),
+    severity: getSeverity(category),
+  };
 }

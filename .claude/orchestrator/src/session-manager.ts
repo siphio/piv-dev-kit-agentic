@@ -2,8 +2,8 @@
 
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { SettingSource } from "@anthropic-ai/claude-agent-sdk";
-import type { SessionConfig, SessionResult, PivCommand } from "./types.js";
-import { getSessionDefaults } from "./config.js";
+import type { SessionConfig, SessionResult, PivCommand, ProgressCallback, BudgetContext } from "./types.js";
+import { getSessionDefaults, getAdaptiveBudget } from "./config.js";
 import { processSession } from "./response-handler.js";
 
 const FALLBACK_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes — only used when no per-command timeout
@@ -43,13 +43,16 @@ function buildOptions(config: SessionConfig, projectDir: string) {
 /**
  * Create a new Agent SDK session (fresh context window).
  */
-export async function createSession(config: SessionConfig): Promise<SessionResult> {
+export async function createSession(
+  config: SessionConfig,
+  onProgress?: ProgressCallback
+): Promise<SessionResult> {
   const { options, timer } = buildOptions(config, config.cwd);
 
   try {
     console.log(`  Creating session: "${config.prompt.slice(0, 60)}..."`);
     const gen = query({ prompt: config.prompt, options });
-    return await processSession(gen);
+    return await processSession(gen, onProgress);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     // The SDK reports abort as "aborted by user" (not a JS AbortError).
@@ -83,9 +86,10 @@ export async function createSession(config: SessionConfig): Promise<SessionResul
  */
 export async function resumeSession(
   sessionId: string,
-  config: SessionConfig
+  config: SessionConfig,
+  onProgress?: ProgressCallback
 ): Promise<SessionResult> {
-  return createSession({ ...config, resumeSessionId: sessionId });
+  return createSession({ ...config, resumeSessionId: sessionId }, onProgress);
 }
 
 /**
@@ -95,9 +99,19 @@ export async function resumeSession(
 export async function runCommandPairing(
   commands: string[],
   projectDir: string,
-  commandType: PivCommand
+  commandType: PivCommand,
+  onProgress?: ProgressCallback,
+  budgetContext?: BudgetContext
 ): Promise<SessionResult[]> {
-  const defaults = getSessionDefaults(commandType);
+  // F2: Use adaptive budget if context provided, otherwise fall back to static
+  const budget = budgetContext
+    ? getAdaptiveBudget(budgetContext)
+    : getSessionDefaults(commandType);
+
+  if (budgetContext) {
+    console.log(`  Budget: ${budget.maxTurns} turns, ${Math.round(budget.timeoutMs / 60_000)} min (${(budget as any).reasoning ?? commandType})`);
+  }
+
   const results: SessionResult[] = [];
   let currentSessionId: string | undefined;
 
@@ -108,14 +122,14 @@ export async function runCommandPairing(
     const config: SessionConfig = {
       prompt: cmd,
       cwd: projectDir,
-      maxTurns: defaults.maxTurns,
-      timeoutMs: defaults.timeoutMs,
+      maxTurns: budget.maxTurns,
+      timeoutMs: budget.timeoutMs,
       resumeSessionId: currentSessionId,
     };
 
     const result = i === 0
-      ? await createSession(config)
-      : await resumeSession(currentSessionId!, config);
+      ? await createSession(config, onProgress)
+      : await resumeSession(currentSessionId!, config, onProgress);
 
     results.push(result);
 

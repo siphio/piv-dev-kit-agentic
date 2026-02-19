@@ -1,14 +1,15 @@
 // PIV Orchestrator — Environment Configuration
 
 import { basename } from "node:path";
-import type { OrchestratorConfig, PivCommand, TelegramConfig } from "./types.js";
+import type { OrchestratorConfig, PivCommand, TelegramConfig, BudgetContext, SessionBudget } from "./types.js";
+import { calculateBudget } from "./budget-calculator.js";
 
 const SESSION_DEFAULTS: Record<PivCommand, { maxTurns: number; timeoutMs: number }> = {
   "prime":                    { maxTurns: 30,   timeoutMs: 10 * 60_000 },   // 10 min
   "plan-feature":             { maxTurns: 100,  timeoutMs: 45 * 60_000 },   // 45 min
   "execute":                  { maxTurns: 200,  timeoutMs: 60 * 60_000 },   // 60 min
   "validate-implementation":  { maxTurns: 100,  timeoutMs: 30 * 60_000 },   // 30 min
-  "commit":                   { maxTurns: 10,   timeoutMs: 5 * 60_000 },    //  5 min
+  "commit":                   { maxTurns: 30,   timeoutMs: 10 * 60_000 },   // 10 min
   "research-stack":           { maxTurns: 100,  timeoutMs: 30 * 60_000 },   // 30 min
   "preflight":                { maxTurns: 50,   timeoutMs: 15 * 60_000 },   // 15 min
 };
@@ -50,4 +51,21 @@ export function loadConfig(): OrchestratorConfig {
 
 export function getSessionDefaults(command: PivCommand): { maxTurns: number; timeoutMs: number } {
   return SESSION_DEFAULTS[command];
+}
+
+/**
+ * F2: Get adaptive budget from project context.
+ * Falls back to static defaults on error.
+ */
+export function getAdaptiveBudget(context: BudgetContext): SessionBudget {
+  try {
+    return calculateBudget(context);
+  } catch (err) {
+    const defaults = SESSION_DEFAULTS[context.command];
+    return {
+      maxTurns: defaults.maxTurns,
+      timeoutMs: defaults.timeoutMs,
+      reasoning: `${context.command}: fallback to static (adaptive calculation failed)`,
+    };
+  }
 }

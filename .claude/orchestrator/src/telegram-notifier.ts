@@ -161,6 +161,13 @@ export class TelegramNotifier {
   }
 
   /**
+   * Send a progress summary (F1). Throttling is handled by the caller.
+   */
+  async sendProgress(phase: number, summary: string): Promise<void> {
+    await this.sendText(summary);
+  }
+
+  /**
    * Create a notification-only TelegramNotifier that can send messages
    * without owning the polling connection. Uses a standalone Bot instance
    * purely for its API — never calls bot.start().

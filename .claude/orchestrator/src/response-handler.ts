@@ -1,7 +1,8 @@
 // PIV Orchestrator — SDK Response Stream Handler
 
-import type { SessionResult, SessionError } from "./types.js";
+import type { SessionResult, SessionError, ProgressCallback, SessionProgress } from "./types.js";
 import { parseHooks } from "./hooks-parser.js";
+import { extractToolEvent, createSessionProgress } from "./progress-tracker.js";
 
 /**
  * Process an AsyncIterable of SDK messages into a structured SessionResult.
@@ -14,7 +15,8 @@ import { parseHooks } from "./hooks-parser.js";
  * - result/error_*: captures error with subtype and messages
  */
 export async function processSession(
-  generator: AsyncIterable<any>
+  generator: AsyncIterable<any>,
+  onProgress?: ProgressCallback
 ): Promise<SessionResult> {
   let sessionId = "";
   let accumulatedText = "";
@@ -23,6 +25,8 @@ export async function processSession(
   let durationMs = 0;
   let turns = 0;
   let error: SessionError | undefined;
+  let turnCount = 0;
+  const progress: SessionProgress | undefined = onProgress ? createSessionProgress() : undefined;
 
   for await (const message of generator) {
     if (message.type === "system") {
@@ -46,9 +50,17 @@ export async function processSession(
     }
 
     if (message.type === "assistant" && message.message?.content) {
+      turnCount++;
       for (const block of message.message.content) {
         if ("text" in block) {
           accumulatedText += block.text + "\n";
+        }
+        // F1: Extract tool_use events for progress tracking
+        if (onProgress && progress && block.type === "tool_use") {
+          const event = extractToolEvent(block, turnCount);
+          if (event) {
+            onProgress(event, progress);
+          }
         }
       }
     }
@@ -81,5 +93,6 @@ export async function processSession(
     durationMs,
     turns,
     error,
+    progress,
   };
 }

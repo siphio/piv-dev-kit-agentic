@@ -5,7 +5,7 @@ import { runPhase, runAllPhases } from "./piv-runner.js";
 import { readManifest, writeManifest, appendFailure } from "./manifest-manager.js";
 import { determineNextAction, findActiveCheckpoint, findPendingFailure } from "./state-machine.js";
 import { checkForRunningInstance, writePidFile, removePidFile } from "./process-manager.js";
-import { hasUncommittedChanges } from "./git-manager.js";
+import { hasUncommittedChanges, ensureGitRepo } from "./git-manager.js";
 import { registerInstance, deregisterInstance, claimBotOwnership } from "./instance-registry.js";
 import { startSignalWatcher, stopSignalWatcher, clearSignal } from "./signal-handler.js";
 import { existsSync } from "node:fs";
@@ -66,6 +66,9 @@ async function main(): Promise<void> {
   console.log(`🔑 Auth: OAuth (subscription via CLAUDE_CODE_OAUTH_TOKEN)`);
   console.log(`🧠 Model: ${config.model}`);
   console.log(`📡 Mode: ${config.mode}`);
+
+  // Ensure git repo exists (creates one with initial commit if needed)
+  ensureGitRepo(projectDir);
 
   // Verify manifest exists
   const manifestPath = join(projectDir, ".agents/manifest.yaml");

@@ -56,6 +56,7 @@ export interface SessionResult {
   durationMs: number;
   turns: number;
   error?: SessionError;
+  progress?: SessionProgress;
 }
 
 // --- Command Pairing ---
@@ -226,6 +227,93 @@ export interface RegistryInstance {
 export interface InstanceRegistry {
   instances: RegistryInstance[];
   lastUpdated: string;
+}
+
+// --- F1: Progress Visibility ---
+
+export type ToolName = "Read" | "Write" | "Edit" | "Bash" | "Glob" | "Grep" | "WebSearch" | "WebFetch" | "Task";
+
+export interface ToolUseEvent {
+  turn: number;
+  tool: ToolName;
+  target: string;
+  timestamp: number;
+}
+
+export interface SessionProgress {
+  turnCount: number;
+  toolUses: ToolUseEvent[];
+  filesCreated: string[];
+  filesModified: string[];
+  testsRun: number;
+  teamSpawns: number;
+  startedAt: number;
+  lastActivityAt: number;
+}
+
+export type ProgressCallback = (event: ToolUseEvent, progress: SessionProgress) => void;
+
+// --- F2: Adaptive Budgets ---
+
+export interface BudgetContext {
+  command: PivCommand;
+  projectDir: string;
+  phase?: number;
+  manifest?: Manifest;
+  priorPhaseStats?: PhaseStats;
+}
+
+export interface PhaseStats {
+  phase: number;
+  turnsUsed: number;
+  taskCount: number;
+  turnsPerTask: number;
+}
+
+export interface SessionBudget {
+  maxTurns: number;
+  timeoutMs: number;
+  reasoning: string;
+}
+
+// --- F3: Smarter Failures ---
+
+export type FailureSeverity = "blocking" | "degraded" | "advisory";
+
+// --- F4: Context Scoring ---
+
+export interface ContextScore {
+  total: number;
+  prdPhaseLoaded: boolean;
+  profilesFound: string[];
+  planReferenced: boolean;
+  manifestAccurate: boolean;
+  details: string[];
+}
+
+// --- F5: Drift Detection ---
+
+export interface DriftResult {
+  phase: number;
+  testsRun: number;
+  testsPassed: number;
+  testsFailed: number;
+  failedTests: string[];
+  regressionDetected: boolean;
+  durationMs: number;
+}
+
+// --- F6: Fidelity ---
+
+export interface FidelityReport {
+  phase: number;
+  plannedFiles: string[];
+  actualFiles: string[];
+  matchedFiles: string[];
+  missingFiles: string[];
+  unplannedFiles: string[];
+  fidelityScore: number;
+  details: string[];
 }
 
 // --- Signal Types ---
