@@ -93,4 +93,32 @@ describe("appendToImprovementLog", () => {
     expect(content).toContain("N/A");
     expect(content).not.toContain("Phase null");
   });
+
+  it("includes memoryRecordId when present", () => {
+    appendToImprovementLog(
+      makeEntry({ memoryRecordId: "doc_abc123" }),
+      logPath,
+    );
+
+    const content = readFileSync(logPath, "utf-8");
+    expect(content).toContain("**Memory Record:** doc_abc123");
+  });
+
+  it("includes memoryRetrievedIds when present", () => {
+    appendToImprovementLog(
+      makeEntry({ memoryRetrievedIds: ["mem_1", "mem_2", "mem_3"] }),
+      logPath,
+    );
+
+    const content = readFileSync(logPath, "utf-8");
+    expect(content).toContain("**Past Fixes Referenced:** mem_1, mem_2, mem_3");
+  });
+
+  it("omits memory fields when not present (no regression)", () => {
+    appendToImprovementLog(makeEntry(), logPath);
+
+    const content = readFileSync(logPath, "utf-8");
+    expect(content).not.toContain("Memory Record");
+    expect(content).not.toContain("Past Fixes Referenced");
+  });
 });

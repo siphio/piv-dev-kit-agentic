@@ -78,6 +78,8 @@ export interface ImprovementLogEntry {
   filePath?: string;
   fixApplied?: boolean;
   propagatedTo?: string[];
+  memoryRecordId?: string;
+  memoryRetrievedIds?: string[];
 }
 
 export interface SupervisorTelegramConfig {
@@ -143,4 +145,38 @@ export interface InterventorConfig {
   diagnosisMaxTurns: number;
   fixMaxTurns: number;
   timeoutMs: number;
+}
+
+// --- Phase 8: SuperMemory Integration ---
+
+export interface MemoryConfig {
+  apiKey: string | undefined;
+  enabled: boolean;
+  containerTagPrefix: string;
+  searchThreshold: number;
+  searchLimit: number;
+  entityContext: string;
+}
+
+export interface FixRecord {
+  content: string;
+  customId: string;
+  containerTag: string;
+  metadata: {
+    error_category: string;
+    phase: string;
+    project: string;
+    fix_type: string;
+    severity: string;
+    command: string;
+    resolved: string;
+  };
+  entityContext: string;
+}
+
+export interface MemorySearchResult {
+  id: string;
+  text: string;
+  similarity: number;
+  metadata: Record<string, string>;
 }

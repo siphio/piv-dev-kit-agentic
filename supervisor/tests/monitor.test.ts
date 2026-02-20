@@ -32,6 +32,14 @@ vi.mock("../src/config.js", () => ({
     fixMaxTurns: 30,
     timeoutMs: 300000,
   })),
+  loadMemoryConfig: vi.fn(() => ({
+    apiKey: "sm_test_key",
+    enabled: true,
+    containerTagPrefix: "project_",
+    searchThreshold: 0.4,
+    searchLimit: 5,
+    entityContext: "Test entity context.",
+  })),
 }));
 
 vi.mock("../src/interventor.js", () => ({
@@ -49,6 +57,12 @@ vi.mock("../src/propagator.js", () => ({
 
 vi.mock("../src/telegram.js", () => ({
   telegramSendFixFailure: vi.fn(() => Promise.resolve({ ok: true })),
+}));
+
+vi.mock("../src/memory.js", () => ({
+  createMemoryClient: vi.fn(() => null),
+  recallSimilarFixes: vi.fn(() => Promise.resolve([])),
+  storeFixRecord: vi.fn(() => Promise.resolve(null)),
 }));
 
 import { runMonitorCycle } from "../src/monitor.js";

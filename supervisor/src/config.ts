@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
-import type { MonitorConfig, InterventorConfig } from "./types.js";
+import type { MonitorConfig, InterventorConfig, MemoryConfig } from "./types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -50,5 +50,20 @@ export function loadInterventorConfig(): InterventorConfig {
     diagnosisMaxTurns: parseInt(process.env.PIV_DIAGNOSIS_MAX_TURNS ?? "15", 10),
     fixMaxTurns: parseInt(process.env.PIV_FIX_MAX_TURNS ?? "30", 10),
     timeoutMs: parseInt(process.env.PIV_INTERVENTION_TIMEOUT_MS ?? "300000", 10),
+  };
+}
+
+/**
+ * Load SuperMemory configuration from environment variables with sensible defaults.
+ */
+export function loadMemoryConfig(): MemoryConfig {
+  const apiKey = process.env.SUPERMEMORY_API_KEY;
+  return {
+    apiKey,
+    enabled: !!apiKey,
+    containerTagPrefix: process.env.PIV_MEMORY_CONTAINER_PREFIX ?? "project_",
+    searchThreshold: parseFloat(process.env.PIV_MEMORY_SEARCH_THRESHOLD ?? "0.4"),
+    searchLimit: parseInt(process.env.PIV_MEMORY_SEARCH_LIMIT ?? "5", 10),
+    entityContext: "This is an error fix record from a PIV supervisor agent. Extract the error pattern, root cause, fix approach, and outcome as separate searchable facts.",
   };
 }

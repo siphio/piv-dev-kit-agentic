@@ -14,12 +14,14 @@ import type {
 
 /**
  * Build a diagnostic prompt from stall context.
+ * Optionally includes past fix context from SuperMemory.
  */
-function buildDiagnosisPrompt(
+export function buildDiagnosisPrompt(
   project: RegistryProject,
   classification: StallClassification,
+  memoryContext?: string,
 ): string {
-  return [
+  const lines = [
     "You are diagnosing why a PIV orchestrator stalled.",
     "",
     `Project: ${project.name}`,
@@ -29,6 +31,23 @@ function buildDiagnosisPrompt(
     `Details: ${classification.details}`,
     `Heartbeat age: ${Math.round(classification.heartbeatAgeMs / 60000)} minutes`,
     "",
+  ];
+
+  if (memoryContext) {
+    lines.push(
+      "## Past Fixes for Similar Errors",
+      "",
+      "The following past fixes were found for similar error patterns. Use them as reference",
+      "during diagnosis — they may reveal the root cause or suggest a fix approach:",
+      "",
+      memoryContext,
+      "",
+      "Note: These are reference fixes from past interventions. Verify applicability before assuming the same fix works.",
+      "",
+    );
+  }
+
+  lines.push(
     "Instructions:",
     "1. Read .agents/manifest.yaml for failures section and recent state",
     "2. Check .agents/progress/ for the latest progress file to see blocked tasks",
@@ -43,7 +62,9 @@ function buildDiagnosisPrompt(
     '  "bugLocation": "framework_bug|project_bug|human_required",',
     '  "confidence": "high|medium|low"',
     "}",
-  ].join("\n");
+  );
+
+  return lines.join("\n");
 }
 
 /**
@@ -106,8 +127,9 @@ export async function diagnoseStall(
   project: RegistryProject,
   classification: StallClassification,
   config: InterventorConfig,
+  memoryContext?: string,
 ): Promise<DiagnosticResult> {
-  const prompt = buildDiagnosisPrompt(project, classification);
+  const prompt = buildDiagnosisPrompt(project, classification, memoryContext);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.timeoutMs);
 

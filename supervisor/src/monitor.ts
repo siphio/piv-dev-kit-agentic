@@ -6,7 +6,7 @@ import { readCentralRegistry, writeCentralRegistry } from "./registry.js";
 import { classifyStall } from "./classifier.js";
 import { determineRecovery, executeRecovery, killProcess, spawnOrchestrator } from "./recovery.js";
 import { appendToImprovementLog } from "./improvement-log.js";
-import { loadInterventorConfig } from "./config.js";
+import { loadInterventorConfig, loadMemoryConfig } from "./config.js";
 import {
   diagnoseStall,
   classifyBugLocation,
@@ -16,11 +16,14 @@ import {
 } from "./interventor.js";
 import { propagateFixToProjects, getOutdatedProjects } from "./propagator.js";
 import { telegramSendFixFailure } from "./telegram.js";
+import { createMemoryClient, recallSimilarFixes, storeFixRecord } from "./memory.js";
 import type {
   MonitorConfig,
   MonitorCycleResult,
   StallClassification,
   SupervisorTelegramConfig,
+  FixRecord,
+  MemorySearchResult,
 } from "./types.js";
 
 /** In-memory restart tracker: projectName → { phase, count } */
@@ -108,7 +111,7 @@ export async function runMonitorCycle(config: MonitorConfig): Promise<MonitorCyc
       }
     }
 
-    // Log the intervention
+    // Log the intervention (with memory fields if available from handleDiagnosis)
     appendToImprovementLog(
       {
         timestamp: new Date().toISOString(),
@@ -118,9 +121,15 @@ export async function runMonitorCycle(config: MonitorConfig): Promise<MonitorCyc
         action: action.type,
         outcome,
         details: classification.details,
+        memoryRecordId: lastMemoryRecordId,
+        memoryRetrievedIds: lastMemoryRetrievedIds,
       },
       config.improvementLogPath,
     );
+
+    // Clear memory fields after consumption
+    lastMemoryRecordId = undefined;
+    lastMemoryRetrievedIds = undefined;
   }
 
   writeCentralRegistry(registry, config.registryPath);
@@ -142,10 +151,33 @@ async function handleDiagnosis(
   config: MonitorConfig,
 ): Promise<string> {
   const interventorConfig = loadInterventorConfig();
+  const memoryConfig = loadMemoryConfig();
+  const memoryClient = createMemoryClient(memoryConfig);
   const project = classification.project;
 
-  // Step 1: Diagnose
-  const diagnostic = await diagnoseStall(project, classification, interventorConfig);
+  // Phase 8: Recall past fixes from SuperMemory before diagnosis
+  let memoryContext = "";
+  let retrievedIds: string[] = [];
+  if (memoryClient) {
+    const errorDescription = `${classification.stallType}: ${classification.details} (Phase ${project.currentPhase ?? "unknown"})`;
+    const containerTag = `${memoryConfig.containerTagPrefix}${project.name}`;
+    const pastFixes = await recallSimilarFixes(memoryClient, errorDescription, containerTag, memoryConfig);
+
+    // Also search cross-project (no containerTag) for patterns
+    const crossProjectFixes = await recallSimilarFixes(memoryClient, errorDescription, undefined, memoryConfig);
+
+    const allFixes = deduplicateFixes([...pastFixes, ...crossProjectFixes]);
+
+    if (allFixes.length > 0) {
+      retrievedIds = allFixes.map((f) => f.id);
+      memoryContext = allFixes
+        .map((f) => `[${f.similarity.toFixed(2)}] ${f.text}\n  Metadata: ${JSON.stringify(f.metadata)}`)
+        .join("\n---\n");
+    }
+  }
+
+  // Step 1: Diagnose (with memory context if available)
+  const diagnostic = await diagnoseStall(project, classification, interventorConfig, memoryContext || undefined);
   const classified = classifyBugLocation(diagnostic, allStalled);
 
   // Step 2: Check if we should escalate immediately
@@ -170,6 +202,7 @@ async function handleDiagnosis(
 
   // Step 3: Apply fix based on bug location
   let fixResult;
+  let fixOutcome = "";
   if (classified.bugLocation === "framework_bug") {
     fixResult = await applyFrameworkHotFix(classified, interventorConfig);
 
@@ -190,7 +223,7 @@ async function handleDiagnosis(
       }
       spawnOrchestrator(project.path);
 
-      return `Fixed framework bug in ${fixResult.filePath}, propagated to ${outdated.length} project(s)`;
+      fixOutcome = `Fixed framework bug in ${fixResult.filePath}, propagated to ${outdated.length} project(s)`;
     }
   } else if (classified.bugLocation === "project_bug") {
     fixResult = await applyProjectFix(project, classified, interventorConfig);
@@ -203,8 +236,50 @@ async function handleDiagnosis(
       }
       spawnOrchestrator(project.path);
 
-      return `Fixed project bug in ${fixResult.filePath}`;
+      fixOutcome = `Fixed project bug in ${fixResult.filePath}`;
     }
+  }
+
+  // Phase 8: Store fix record in SuperMemory after successful fix
+  let memoryRecordId: string | undefined;
+  if (fixResult?.success && memoryClient) {
+    const record: FixRecord = {
+      content: [
+        `## Fix Record: ${classified.errorCategory}`,
+        "",
+        `**Error:** ${classification.stallType} — ${classification.details}`,
+        `**Root Cause:** ${classified.rootCause}`,
+        `**Fix:** ${fixResult.details}`,
+        `**File:** ${fixResult.filePath}`,
+        `**Lines Changed:** ${fixResult.linesChanged}`,
+        `**Outcome:** ${fixOutcome}`,
+      ].join("\n"),
+      customId: `fix_${new Date().toISOString().replace(/[:.]/g, "-")}_${classified.errorCategory}`,
+      containerTag: `${memoryConfig.containerTagPrefix}${project.name}`,
+      metadata: {
+        error_category: classified.errorCategory,
+        phase: String(project.currentPhase ?? 0),
+        project: project.name,
+        fix_type: "code_change",
+        severity: classified.confidence === "high" ? "critical" : "warning",
+        command: "monitor",
+        resolved: "true",
+      },
+      entityContext: memoryConfig.entityContext,
+    };
+
+    const stored = await storeFixRecord(memoryClient, record);
+    if (stored) {
+      memoryRecordId = stored.id;
+    }
+  }
+
+  if (fixOutcome) {
+    // Update the log entry with memory fields on next appendToImprovementLog call
+    // (handled by the caller in runMonitorCycle — we extend it below)
+    lastMemoryRecordId = memoryRecordId;
+    lastMemoryRetrievedIds = retrievedIds.length > 0 ? retrievedIds : undefined;
+    return fixOutcome;
   }
 
   // Step 4: Fix failed — escalate
@@ -222,7 +297,25 @@ async function handleDiagnosis(
     );
   }
 
+  lastMemoryRecordId = undefined;
+  lastMemoryRetrievedIds = retrievedIds.length > 0 ? retrievedIds : undefined;
   return `Escalated: fix failed — ${fixResult?.details ?? classified.rootCause}`;
+}
+
+/** Memory fields from the most recent handleDiagnosis call, consumed by runMonitorCycle. */
+let lastMemoryRecordId: string | undefined;
+let lastMemoryRetrievedIds: string[] | undefined;
+
+/**
+ * Deduplicate memory search results by ID.
+ */
+function deduplicateFixes(fixes: MemorySearchResult[]): MemorySearchResult[] {
+  const seen = new Set<string>();
+  return fixes.filter((f) => {
+    if (seen.has(f.id)) return false;
+    seen.add(f.id);
+    return true;
+  });
 }
 
 /**

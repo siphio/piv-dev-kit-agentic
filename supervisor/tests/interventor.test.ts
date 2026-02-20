@@ -23,6 +23,7 @@ import {
   applyFrameworkHotFix,
   applyProjectFix,
   shouldEscalate,
+  buildDiagnosisPrompt,
 } from "../src/interventor.js";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { execFileSync } from "node:child_process";
@@ -307,6 +308,70 @@ describe("applyProjectFix", () => {
     const callArgs = vi.mocked(query).mock.calls[0][0];
     expect(callArgs.options.cwd).toBe("/tmp/my-agent");
     expect(result.success).toBe(true);
+  });
+});
+
+describe("buildDiagnosisPrompt — memory context", () => {
+  it("includes past fixes section when memoryContext is provided", () => {
+    const prompt = buildDiagnosisPrompt(
+      makeProject(),
+      makeClassification(),
+      "Past fix: Added null check for token refresh",
+    );
+
+    expect(prompt).toContain("## Past Fixes for Similar Errors");
+    expect(prompt).toContain("Past fix: Added null check for token refresh");
+    expect(prompt).toContain("Verify applicability before assuming the same fix works");
+  });
+
+  it("omits past fixes section when memoryContext is undefined", () => {
+    const prompt = buildDiagnosisPrompt(
+      makeProject(),
+      makeClassification(),
+    );
+
+    expect(prompt).not.toContain("## Past Fixes for Similar Errors");
+    expect(prompt).toContain("Instructions:");
+  });
+
+  it("omits past fixes section when memoryContext is empty string", () => {
+    const prompt = buildDiagnosisPrompt(
+      makeProject(),
+      makeClassification(),
+      "",
+    );
+
+    expect(prompt).not.toContain("## Past Fixes for Similar Errors");
+  });
+});
+
+describe("diagnoseStall — memory context passthrough", () => {
+  it("passes memoryContext through to prompt", async () => {
+    const jsonResult = JSON.stringify({
+      rootCause: "Test",
+      filePath: null,
+      errorCategory: "test",
+      bugLocation: "human_required",
+      confidence: "low",
+    });
+
+    vi.mocked(query).mockReturnValue(
+      mockQueryGenerator([
+        { type: "system", session_id: "test-session" },
+        { type: "result", subtype: "success", result_text: jsonResult },
+      ])() as ReturnType<typeof query>,
+    );
+
+    await diagnoseStall(
+      makeProject(),
+      makeClassification(),
+      makeConfig(),
+      "Memory context: prior fix details",
+    );
+
+    const callArgs = vi.mocked(query).mock.calls[0][0];
+    expect(callArgs.prompt).toContain("## Past Fixes for Similar Errors");
+    expect(callArgs.prompt).toContain("Memory context: prior fix details");
   });
 });
 

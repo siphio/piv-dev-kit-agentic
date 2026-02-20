@@ -35,6 +35,14 @@ function formatEntry(entry: ImprovementLogEntry): string {
     lines.push(`- **Propagated To:** ${entry.propagatedTo.join(", ")}`);
   }
 
+  // Phase 8 memory fields (optional)
+  if (entry.memoryRecordId) {
+    lines.push(`- **Memory Record:** ${entry.memoryRecordId}`);
+  }
+  if (entry.memoryRetrievedIds && entry.memoryRetrievedIds.length > 0) {
+    lines.push(`- **Past Fixes Referenced:** ${entry.memoryRetrievedIds.join(", ")}`);
+  }
+
   lines.push("");
   return lines.join("\n");
 }

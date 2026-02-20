@@ -15,7 +15,8 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.49",
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^4.1.0",
+    "supermemory": "^4.11.0"
   },
   "devDependencies": {
     "@grammyjs/types": "^3.16.0",
