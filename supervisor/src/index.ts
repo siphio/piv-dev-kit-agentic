@@ -5,6 +5,8 @@ import { resolve, basename, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pivInit } from "./init.js";
 import { listProjects, pruneDeadProjects, getRegistryPath } from "./registry.js";
+import { startMonitor, runMonitorCycle } from "./monitor.js";
+import { loadMonitorConfig } from "./config.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -17,9 +19,12 @@ Usage:
   piv init <path> [--name <name>]   Bootstrap a new PIV project
   piv status                        Show all registered projects
   piv list                          Alias for status
+  piv monitor                       Start the supervisor monitor loop
+  piv monitor --once                Run a single monitoring cycle and exit
 
 Options:
   --name <name>   Project name (defaults to directory basename)
+  --once          Run single monitor cycle then exit
   --help          Show this help message
 `);
 }
@@ -124,6 +129,23 @@ if (!command || command === "--help") {
   handleInit(args.slice(1));
 } else if (command === "status" || command === "list") {
   handleStatus();
+} else if (command === "monitor") {
+  const monitorArgs = args.slice(1);
+  const once = monitorArgs.includes("--once");
+  const config = loadMonitorConfig();
+
+  if (once) {
+    runMonitorCycle(config)
+      .then((result) => {
+        console.log(`\n✅ Single cycle complete:`, result);
+      })
+      .catch((err) => {
+        console.error("Monitor cycle failed:", err);
+        process.exit(1);
+      });
+  } else {
+    startMonitor(config);
+  }
 } else {
   console.error(`Unknown command: ${command}`);
   printUsage();
