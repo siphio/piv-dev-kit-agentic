@@ -70,14 +70,34 @@ Strip flags from arguments before using remaining text as the feature descriptio
 
 **Scope Analysis Process:**
 
+0. **Detect Evolution Mode**
+
+   Read `.agents/manifest.yaml`. Check for `evolution` section.
+
+   **If `evolution` section IS present (evolution mode):**
+   - Read PRD2 (`artifacts.prd2.path` or `evolution.prd2_path`) — this is the active requirements document
+   - Read first 80 lines of gen 1 PRD (`artifacts.prd.path`) — for foundation context only
+   - Note which phase numbers belong to gen 2 (`evolution.gen2_phases`)
+   - Build a FOUNDATION summary (see below) — this informs what already exists and must NOT be re-implemented
+
+   **FOUNDATION Summary (built from gen 1 PRD + disk evidence):**
+   - Scan gen 1 PRD for "## Phase N" sections and their "What This Phase Delivers" content
+   - Scan existing validation files (`.agents/validation/`) for evidence of what is live and tested
+   - Output as `## FOUNDATION` block in terminal (see format below)
+
+   **If no `evolution` section (standard mode):**
+   - Proceed with normal PRD loading
+
 1. **Validate Technology Profiles Exist**
    - Check if `.agents/reference/` directory exists
    - List all `*-profile.md` files in that directory
+   - In evolution mode: also check if any `research.pending` entries remain — if so, output a warning and stop: "New technologies from PRD2 are not yet profiled. Run `/research-stack [prd2_path]` first."
    - If no profiles exist: **WARN**: "Technology profiles not found. Consider running `/research-stack` first for better context."
    - If profiles exist: Continue with analysis below
 
 2. **Read the PRD Phase**
-   - Identify which phase is being planned (from user input or PRD "Current Focus")
+   - In evolution mode: read from PRD2; phase number may be e.g. "Phase 4" even though PRD2 labels it "Phase 1" — use the manifest's gen2_phases numbering
+   - In standard mode: identify which phase is being planned (from user input or PRD "Current Focus")
    - Extract: What this phase delivers, prerequisites, scope (included/excluded)
    - Extract: User stories addressed by this phase
 
@@ -102,10 +122,34 @@ Strip flags from arguments before using remaining text as the feature descriptio
 
 **Terminal Output Format:**
 
+In evolution mode, output the FOUNDATION block BEFORE the Scope Analysis block:
+
+```
+## FOUNDATION: What Gen 1 Already Built
+
+**Gen 1 PRD:** [path] | **Generation:** [N]
+
+### Already Implemented (DO NOT RE-IMPLEMENT)
+- Phase 1 — [name]: [2-3 sentence summary of what was delivered]
+- Phase 2 — [name]: [2-3 sentence summary]
+- Phase 3 — [name]: [2-3 sentence summary]
+
+### Key Existing Files
+- [key service files, entry points, config files found on disk]
+
+### Architecture Foundation
+- [core patterns established in gen 1: e.g., "Uses LangGraph for agent state", "OpenAI GPT-4 for all completions", "Redis for session state"]
+
+### What Gen 2 ADDS (from PRD2)
+- [brief list of new capabilities this gen 2 phase introduces]
+```
+
+---
+
 ```
 ## Scope Analysis: [Phase Name]
 
-**PRD Phase:** [N] - [Name]
+**PRD Phase:** [N] - [Name] ([in evolution: "Gen 2 Phase X / manifest phase N"])
 **User Stories:** US-XXX, US-XXX
 **Technology Profiles Available**: [list profiles or "none found"]
 **Prerequisites:** [Status of each - ✅ Complete / ⚪ Not Started / 🔴 Blocked]
@@ -252,9 +296,6 @@ So that <benefit/value>
 - Find similar test examples for reference
 - Understand test organization (unit vs integration)
 - Note coverage requirements and testing standards
-- Check for existing `tests/integration/` or `tests/live/` directory
-- Check for existing `.agents/fixtures/` with recorded API responses
-- Identify conftest.py patterns: separate mock fixtures (unit) vs live fixtures (integration)
 
 **5. Integration Points**
 
@@ -296,17 +337,14 @@ So that <benefit/value>
    - Identify where agent must fallback or retry based on technology limitations
    - Document decision criteria that depend on technology responses
 
-5. **Extract Validation Hooks (Section 9)**
-   - For each relevant technology profile, read Section 9: Live Integration Testing Specification
-   - Catalog all endpoints by testing tier:
-     - Tier 1: health check commands, expected response schemas
-     - Tier 2: test data endpoints, cleanup procedures, required env vars
-     - Tier 3: cost estimates, fixture save paths, approval context
-     - Tier 4: fixture files, mock strategies
-   - Record test environment configuration from Section 9.2 (required env vars)
-   - Record testing sequence from Section 9.3 (order of tier execution)
-   - These become the source material for the VALIDATION COMMANDS section
-   - If a profile lacks Section 9: WARN — "Profile {name} missing Section 9. Live testing for this technology will be incomplete."
+5. **Extract Validation Commands from Section 9**
+   - For each technology profile, read Section 9 (Live Integration Testing Specification)
+   - Extract ALL Tier 1-4 test definitions — these are executable test commands, not documentation
+   - Map each test to the plan's VALIDATION COMMANDS section:
+     - Tier 1-2 tests → Level 3 (Integration Tests)
+     - Tier 3-4 tests → Level 4 (Live Integration Validation)
+   - Include the actual test code/commands from the profile — do NOT paraphrase or summarize
+   - If a profile has `total_test_cases: N` in its hooks, the plan MUST reference all N tests
 
 ### Phase 4: External Research & Supplementary Documentation
 
@@ -415,14 +453,6 @@ So that <benefit/value>
 
 - [Continue for each technology profile read]
 
-**Validation Hooks (from Section 9):**
-- `{technology-name}`:
-  - Tier 1: [endpoints + health check commands]
-  - Tier 2: [endpoints + test data + cleanup]
-  - Tier 3: [endpoints + cost + fixture paths]
-  - Tier 4: [endpoints + fixture files]
-  - Env vars: [from Section 9.2]
-
 **Impact on Implementation:**
 [How the technology capabilities/constraints shape this feature's design]
 
@@ -493,6 +523,38 @@ So that <benefit/value>
 
 - [Recovery pattern 1 with technology fallback]
 - [Recovery pattern 2]
+
+---
+
+## FOUNDATION (Evolution Mode Only)
+
+> Include this section ONLY when `evolution.generation >= 2` in manifest. Remove entirely for gen 1 plans.
+
+**Generation:** [N] | **Active PRD:** [PRD2 path]
+
+### What Gen 1 Already Implemented
+
+| Phase | Name | Delivered |
+|-------|------|-----------|
+| 1 | [name] | [brief: e.g., "Core agent loop, Telegram integration, OpenAI tool calling"] |
+| 2 | [name] | [brief] |
+| 3 | [name] | [brief] |
+
+### Key Existing Files (Do Not Recreate)
+
+- `[path]` — [what it does, e.g., "Main agent entry point"]
+- `[path]` — [what it does]
+- `[path]` — [e.g., "Tool registry — add new tools here, don't create a new registry"]
+
+### Architecture Established in Gen 1
+
+- [Core pattern 1, e.g., "LangGraph StateGraph for all agent state management"]
+- [Core pattern 2, e.g., "All external calls go through src/tools/ with tool-use protocol"]
+- [Core pattern 3, e.g., "Config loaded from .env via pydantic BaseSettings"]
+
+### Gen 2 Adds (This Plan's Scope)
+
+- [What this gen 2 phase specifically introduces — from PRD2 phase description]
 
 ---
 
@@ -620,15 +682,12 @@ Design unit tests with fixtures and assertions following existing testing approa
 
 ### Integration Tests
 
-<Scope and requirements based on project standards>
+<Scope and requirements — MUST include live tests against external services>
 
-**Live integration tests (MANDATORY if technology profiles have Section 9):**
-- Create `tests/integration/` directory with live test files
-- Tier 1-2: Load credentials from `.env`, call real APIs, validate response schemas
-- Tier 3: Same, plus save responses to `.agents/fixtures/`
-- Tier 4: Load fixtures, feed to agent processing logic
-- Integration conftest.py loads env vars and provides live API client fixtures
-- Unit conftest.py provides mock fixtures — SEPARATE from integration conftest
+**REQUIRED if technology profiles exist:**
+- Pull Tier 1-2 test cases from each technology profile Section 9
+- These must make real API calls (not mocked) when run
+- Design integration tests that exercise the actual service connections
 
 **[If agent feature]** Include tests that verify decision tree outcomes match PRD Section 4.2
 
@@ -636,70 +695,73 @@ Design unit tests with fixtures and assertions following existing testing approa
 
 <List specific edge cases that must be tested for this feature>
 
-**[If using technology]** Include edge cases mentioned in technology profile (rate limit handling, auth failures, etc)
+**REQUIRED if technology profiles exist:**
+- Pull Tier 4 edge case tests from each technology profile Section 9
+- Include rate limit handling, auth failures, timeout scenarios from profiles
+- Include resilience tests (crash recovery, concurrent operations) from profiles
 
 ---
 
 ## VALIDATION COMMANDS
 
-> Source: project tools (Phase 2) + technology profile Section 9 validation hooks (Phase 3 Step 5).
-> Execute every command. Tier 1-3 use REAL APIs with REAL credentials from `.env`.
+<Define validation commands based on project tools AND technology profile Section 9 tests>
+
+Execute every command to ensure zero regressions and 100% feature correctness.
+
+**CRITICAL**: Levels 3-4 MUST include live integration tests from technology profile Section 9.
+If this feature uses external technologies with profiles, `pytest` alone is NOT sufficient for Level 3-4.
+Level 3-4 must include commands that make real API calls, start real processes, or exercise real integrations.
 
 ### Level 1: Syntax & Style
-```bash
-# [Project-specific type checking / linting / formatting]
-```
-**Expected**: All pass with exit code 0
-
-### Level 2: Unit Tests (Mocked — Offline)
-```bash
-# [Project-specific unit test command — runs with mock fixtures, zero network calls]
-```
-**Expected**: All pass. No live API calls.
-
-### Level 3: Live API Tests — Tier 1 & 2 (Auto-Run)
-
-> **Source**: Technology profile Section 9.1 (Tier 1 and Tier 2 tables)
-> **No approval needed** — read-only health checks + controlled test data with cleanup.
-
-For EACH technology profile consumed by this feature, extract and list:
-
-**[Technology Name] — Tier 1 (Health Checks):**
-```bash
-# [Actual command from profile Section 9.1 Tier 1]
-```
-Expected: Auth valid. Service reachable. Response matches schema.
-
-**[Technology Name] — Tier 2 (Test Data):**
-```bash
-# [Actual command from profile Section 9.1 Tier 2]
-```
-Cleanup: [command from profile]
-Required env vars: [from profile Section 9.2]
-
-### Level 4: Live API Tests — Tier 3 (Auto-Approved After Preflight)
-
-> **Source**: Technology profile Section 9.1 (Tier 3 table)
-> Credentials verified by `/preflight`. Responses saved to `.agents/fixtures/`.
-
-**[Technology Name] — Tier 3 ([Operation]):**
-```bash
-# [Actual command from profile Section 9.1 Tier 3]
-```
-Cost: [from profile]
-Fixture: `.agents/fixtures/[tech]-[endpoint].json`
-
-### Level 5: Mock-Only Tests — Tier 4
-
-> **Source**: Technology profile Section 9.1 (Tier 4 table)
-> Never live — uses fixtures from `.agents/fixtures/`.
 
 ```bash
-# [Command loading fixture data into agent logic]
+# Project-specific lint/format/type commands
 ```
-Fixture: `.agents/fixtures/[tech]-[endpoint].json`
 
-### Level 6: Additional Validation (Optional)
+**Expected**: All commands pass with exit code 0
+
+### Level 2: Unit Tests
+
+```bash
+# Project-specific test runner — mocked dependencies are acceptable here
+```
+
+**Expected**: All tests pass, coverage meets project standards
+
+### Level 3: Live Integration Tests
+
+```bash
+# MUST include commands from technology profile Section 9 (Tier 1-2)
+# These test real connectivity, real API calls, real service health
+# Examples: health check endpoints, test data operations with cleanup
+```
+
+**REQUIREMENTS**:
+- Include ALL Tier 1 tests from every relevant technology profile Section 9
+- Include ALL Tier 2 tests from every relevant technology profile Section 9
+- Each command must make a real network call or start a real process — NOT mocked
+- If profile defines N Tier 1-2 tests, this section must have N commands
+- Acceptable formats: pytest tests that hit real APIs, curl commands, CLI invocations, SDK smoke tests
+
+### Level 4: Live Integration Validation
+
+```bash
+# MUST include commands from technology profile Section 9 (Tier 3-4)
+# AND end-to-end pipeline tests that exercise PRD scenarios
+# These validate full agent behavior against real systems
+```
+
+**REQUIREMENTS**:
+- Include ALL Tier 3 tests from every relevant technology profile Section 9
+- Include Tier 4 mock/fixture tests
+- Include at least one end-to-end command that exercises the feature's primary PRD scenario
+- `pytest` with all mocked dependencies does NOT satisfy this level
+- For bots: start the bot, send test input, verify response
+- For APIs: hit endpoints with test data, verify responses
+- For agents: run the agent with test prompts, verify behavior
+
+### Level 5: Additional Validation (Optional)
+
 <MCP servers or additional CLI tools if available>
 
 ---
@@ -828,7 +890,6 @@ checkpoint: none
 - [ ] Gotchas and anti-patterns captured
 - [ ] Every task has executable validation command
 - [ ] Technology profiles integrated and referenced in tasks
-- [ ] Technology profile Section 9 validation hooks extracted and mapped to VALIDATION COMMANDS
 
 ### Implementation Ready ✓
 
@@ -845,6 +906,14 @@ checkpoint: none
 - [ ] No reinvention of existing patterns or utils
 - [ ] Testing approach matches project standards
 - [ ] Agent behavior matches PRD decision trees and scenarios
+
+### Evolution Integrity ✓ (evolution mode only)
+
+- [ ] FOUNDATION section included and accurate
+- [ ] No tasks recreate gen 1 tools, services, or patterns already validated
+- [ ] Gen 2 tasks build on (import/extend) existing gen 1 modules — don't replace them
+- [ ] Phase number in plan matches manifest gen2_phases numbering (e.g., "Phase 4" not "Phase 1")
+- [ ] PRD2 referenced as active PRD; gen 1 PRD referenced only for foundation context
 
 ### Information Density ✓
 
@@ -873,6 +942,7 @@ After creating the Plan, provide:
 - **Line count**: [Must be 500-750] - If outside range, fix before reporting
 - **File path**: Full path to created Plan file
 - **Summary**: Brief description of feature and approach
+- **Evolution mode**: [Yes (Gen N, Phase N of PRD2) | No]
 - **Complexity**: Low/Medium/High
 - **Risks**: Key implementation considerations
 - **Technology Integration**: [List of `.agents/reference/` profiles consumed, if any]

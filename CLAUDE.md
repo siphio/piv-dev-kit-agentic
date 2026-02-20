@@ -243,6 +243,7 @@ Every command failure is classified into one of these categories with a mapped r
 | `prd_gap` | `/plan-feature` Phase 0 | Make best-effort assumption, document reasoning, continue | 0 | No — agent resolves with documented assumption |
 | `partial_execution` | `/execute` | Auto-rollback to checkpoint, retry once | 1 | Yes — only after auto-retry fails |
 | `line_budget_exceeded` | `/create-prd`, `/plan-feature` | Auto-trim and retry | 1 | No |
+| `static_only_validation` | `/validate` (orchestrator-detected) | Re-invoke `/validate-implementation` | 1 | No (unless retry also static-only) |
 
 On failure, all commands output a `## PIV-Error` block (always-on, not gated by hooks) and write to manifest `failures` section. Format:
 
@@ -284,6 +285,10 @@ The orchestrator reads `blocking: true` to know when to pause and wait for human
 - `/prime` only reports notifications where `acknowledged` is absent or `false`
 - Acknowledged notifications are retained for history but excluded from active reporting
 - The framework writes; the orchestrator manages lifecycle
+
+### Orchestrator Enforcement: Live Test Gate
+
+`/validate-implementation` writes `live_tests_executed` and `live_tests_required` to both hooks and manifest. The orchestrator enforces these — see `agentic-wrapper.md` Live Test Gate section for full implementation spec including `post_validation_gate()` function, retry logic, and escalation flow.
 
 ## 13. Prompting & Reasoning Guidelines
 

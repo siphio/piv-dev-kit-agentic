@@ -16,6 +16,29 @@ argument-hint: [plan-file-path] [--full]
 
 **Philosophy**: Static analysis tells you code *looks* right. Functional testing proves it *runs*. Scenario validation proves the agent *behaves correctly*.
 
+## Live Testing Mandate
+
+**Code review is NOT validation.** Reading source code to verify logic paths match the PRD is static analysis — it belongs in Phase 1 (max 5 minutes). It does NOT satisfy Phase 3 or Phase 4.
+
+**Rules:**
+1. Every technology profile with Section 9 tests MUST have those tests EXECUTED (not reviewed)
+2. Every PRD scenario MUST be exercised by running actual commands, not by tracing code paths
+3. If zero live tests are executed across all tiers, validation status = FAIL regardless of other results
+4. "Verified via code review" is NEVER an acceptable result for Tier 1-4 or scenario validation
+5. The validation report MUST include a `live_tests_executed` count — if this count is 0, the report is invalid
+
+**What counts as a live test:**
+- Running a command and checking its exit code
+- Making an API call and checking the response
+- Starting a process and sending it input
+- Executing pytest tests that make real network calls (not mocked)
+
+**What does NOT count:**
+- Reading a source file and confirming it matches a pattern
+- Tracing a code path manually through imports
+- Confirming a function signature matches a type definition
+- Reviewing test files without executing them
+
 ## Arguments
 
 - `$ARGUMENTS`: Plan file path (optional, defaults to most recent in `.agents/plans/`)
@@ -102,10 +125,12 @@ ls -t .agents/plans/*.md 2>/dev/null | head -1
 - Extract Section 4.2: Decision Trees (expected decision outcomes)
 - Extract Section 4.4: Error Recovery Patterns (expected recovery behaviors)
 
-**From Technology Profiles (if exist):**
+**From Technology Profiles (REQUIRED if `.agents/reference/` exists):**
 - Check `.agents/reference/` for `*-profile.md` files
-- From each relevant profile, read Section 9: Validation Hooks
-- Extract health checks, smoke tests, and mock strategies
+- If profiles exist: read Section 9 from EVERY profile. Extract ALL Tier 1-4 test definitions. These are MANDATORY test executions, not optional reading material.
+- If profiles exist but lack Section 9: log warning, continue without tier tests for that technology
+- If `.agents/reference/` does not exist: log warning in validation matrix, proceed with plan commands and PRD scenarios only
+- **CRITICAL**: Technology profile Section 9 tests are the PRIMARY source for live integration testing. Plan VALIDATION COMMANDS are secondary. When both exist, execute BOTH.
 
 ### Step 3: Build Validation Matrix
 
@@ -132,6 +157,16 @@ Combine all sources into a validation matrix:
 ### Technology Validation (from Profiles)
 - Health checks: [N]
 - Smoke tests: [N]
+
+### Live Test Execution Budget
+- Technology profile Tier 1 tests: [N] (MUST execute)
+- Technology profile Tier 2 tests: [N] (MUST execute)
+- Technology profile Tier 3 tests: [N] (MUST execute)
+- Technology profile Tier 4 tests: [N] (fixture-based, MUST execute)
+- Plan Level 3+ commands: [N] (MUST execute)
+- PRD scenarios to exercise live: [N] (MUST exercise, not code-review)
+- **Total live tests required: [SUM]**
+- **Minimum live tests for PASS: [SUM] (zero tolerance — all must run)**
 
 ### Acceptance Criteria
 - [ ] [Criterion 1]
@@ -207,10 +242,13 @@ checkpoint: [active checkpoint tag or "none"]
 
 ---
 
-## Phase 3: Live Integration Testing & Scenario Validation
+## Phase 3: Live Integration Testing & Scenario Validation (MANDATORY)
 
-> **THE CORE PHASE - Tests real API integrations AND agent behavior against PRD scenarios.**
+> **THE CORE PHASE — MUST execute real tests, not review code.**
 > Uses the four-tier testing classification from technology profiles (Section 9).
+> Every test in this phase MUST be EXECUTED — running commands, making API calls, starting processes.
+> Code review, source tracing, and "verified by reading" are PROHIBITED in this phase.
+> If you find yourself reading source files instead of running commands, STOP and run the actual test.
 
 ### Step 1: Tier 1 — Auto-Live Health Checks (No Approval)
 
@@ -269,7 +307,7 @@ These have controlled side effects with automatic cleanup.
 **Test data sourcing:**
 - Read test configuration from profile Section 9.1 (Tier 2 table)
 - Environment variables (PIV_TEST_EMAIL, etc.) must be set in .env
-- If env vars missing: WARN and skip Tier 2 for that technology
+- If env vars missing: FAIL validation with `integration_auth` error category. Missing test environment variables means credentials were not provisioned. Output PIV-Error block and escalate — do NOT skip silently.
 
 **Cleanup is mandatory:** Always run cleanup procedures after Tier 2 tests, even if the test itself failed. Cleanup must be idempotent.
 
@@ -327,8 +365,10 @@ Tests that the agent correctly processes responses, not that the API works.
 ```
 
 **If fixture doesn't exist:**
-- WARN: "No fixture for [endpoint]. Create one by running Tier 3 approval test first, or manually add fixture."
-- Mark as ⚠️ NO FIXTURE
+- Run the corresponding Tier 3 live test FIRST to generate the fixture
+- If Tier 3 test passes: save fixture, then run Tier 4 with the new fixture
+- If Tier 3 test cannot run (no credentials, service down): mark as ⚠️ NO FIXTURE with explicit reason
+- NEVER skip Tier 4 silently — always document why a fixture is missing
 
 ### Step 5: PRD Scenario Validation
 
@@ -412,12 +452,17 @@ All tiers run in parallel — no human interaction required.
 
 ---
 
-## Phase 4: Full Pipeline
+## Phase 4: Full Pipeline (MANDATORY)
 
-Run the complete end-to-end agent pipeline. This may:
-- Make real API calls (costs are pre-authorized by autonomous mode)
-- Take several minutes
-- Create actual output files
+**MUST run the complete end-to-end pipeline before validation can report PASS.**
+
+This phase:
+- Makes real API calls (costs are pre-authorized by autonomous mode)
+- Takes several minutes — this is expected
+- Creates actual output files
+- **Is NOT optional** — skipping Phase 4 means validation status = PARTIAL at best
+
+**What to run:** Use the plan's Level 4 commands if defined. If plan Level 4 is absent or only has `pytest`, construct an end-to-end test: start the application, send it real input, verify it produces expected output. For bots: start the bot, send a test command via the API, verify the response. For APIs: hit the endpoint with test data, verify the response. For CLIs: run the command with test args, verify output.
 
 ```
 ### Full Pipeline
@@ -591,6 +636,43 @@ Location: `.agents/validation/{feature-name}-{YYYY-MM-DD}.md`
 [Based on results - ready for /commit or needs fixes]
 ```
 
+### Live Test Execution Verification
+
+> **CRITICAL — DO THIS BEFORE WRITING HOOKS OR REPORT SUMMARY.**
+>
+> The orchestrator reads `live_tests_executed` from the hooks block to enforce the live test gate.
+> If this key is **missing or 0** and technology profiles exist, the orchestrator will **automatically re-run this entire validation session**.
+> You MUST count your live tests and write the number — **do not skip this step**.
+
+Count actual live tests by tallying each category:
+
+```
+### Live Execution Summary
+- Tier 1 health checks executed: [N] (commands run with exit codes)
+- Tier 2 test data operations executed: [N]
+- Tier 3 live integration tests executed: [N]
+- Tier 4 fixture-based tests executed: [N]
+- Plan validation commands executed: [N]
+- PRD scenarios exercised live: [N]
+- **Total live tests executed: [N]**
+- **Total live tests required: [N]**
+```
+
+Write these two numbers down — they MUST appear as `live_tests_executed` and `live_tests_required` as the **first two keys** in the `## PIV-Automator-Hooks` block at the end of the report.
+
+**FAIL-SAFE**: If `Total live tests executed` is 0 and technology profiles exist, validation status MUST be FAIL. Output:
+
+```
+## PIV-Error
+error_category: scenario_mismatch
+command: validate-implementation
+phase: [N]
+details: "Zero live tests executed despite technology profiles defining [N] Tier 1-4 tests. Validation was static-only — this is not valid."
+retry_eligible: true
+retries_remaining: 1
+checkpoint: [active checkpoint or "none"]
+```
+
 ### Manifest Update
 
 After writing the report file, update `.agents/manifest.yaml` (create if needed):
@@ -600,6 +682,8 @@ validations:
     phase: [N]
     status: [pass|partial|fail]
     completed_at: [current ISO 8601 timestamp]
+    live_tests_executed: [N]
+    live_tests_required: [N]
     scenarios_passed: [N]
     scenarios_failed: [N]
     scenarios_skipped: [N]
@@ -667,10 +751,17 @@ Self-critique the validation (terminal only):
 
 ### PIV-Automator-Hooks
 
+> **MANDATORY**: `live_tests_executed` and `live_tests_required` MUST be the first two keys in this block.
+> The orchestrator parses these values to enforce the live test gate. If either key is absent, the orchestrator
+> treats the validation as static-only and re-runs the entire session. Write the values you computed in the
+> Live Test Execution Verification section above.
+
 Append to the validation report file:
 
 ```
 ## PIV-Automator-Hooks
+live_tests_executed: [N]
+live_tests_required: [N]
 validation_status: [pass|partial|fail]
 scenarios_passed: [N]/[Total]
 scenarios_failed: [N]
@@ -683,6 +774,8 @@ retry_remaining: [N]
 requires_clear: [true|false]
 confidence: [high|medium|low]
 ```
+
+**Orchestrator enforcement contract:** The orchestrator parses `live_tests_executed` from hooks. If the key is **absent**, the orchestrator falls back to parsing the validation report file directly to count live tests. If the extracted count is 0 AND technology profiles exist, the orchestrator rejects the validation and re-invokes `/validate-implementation` regardless of `validation_status`. Writing `live_tests_executed: 0` when no tests ran is honest; omitting the key entirely is the silent failure mode — both will trigger a re-run when profiles are present.
 
 ---
 

@@ -18,6 +18,8 @@ import { createProgressCallback } from "./progress-tracker.js";
 import { scoreContext, isContextSufficient, formatContextScore } from "./context-scorer.js";
 import { checkFidelity, formatFidelityReport } from "./fidelity-checker.js";
 import { runRegressionTests } from "./drift-detector.js";
+import { startHeartbeat, stopHeartbeat } from "./heartbeat.js";
+import { basename } from "node:path";
 import type {
   SessionResult,
   FailureEntry,
@@ -511,6 +513,11 @@ export async function runAllPhases(
 
   console.log(`\n🚀 Starting autonomous execution — ${phases.length} phases\n`);
 
+  // Central registry heartbeat (every 2 min — for supervisor stall detection)
+  const projectName = basename(projectDir);
+  const registryHeartbeatTimer = startHeartbeat(projectDir, projectName);
+  console.log(`💓 Central registry heartbeat started (every 2 min)`);
+
   // Heartbeat: send periodic "still running" message to Telegram (every 30 min)
   const heartbeatInterval = notifier ? setInterval(async () => {
     try {
@@ -552,6 +559,7 @@ export async function runAllPhases(
     if (blockingFailure) {
       console.log(`\n🛑 Stopping — blocking failure in phase ${blockingFailure.phase}: ${blockingFailure.details}`);
       if (heartbeatInterval) clearInterval(heartbeatInterval);
+      stopHeartbeat(registryHeartbeatTimer, projectDir, projectName);
       break;
     }
     // Log non-blocking failures but continue
@@ -561,8 +569,9 @@ export async function runAllPhases(
     }
   }
 
-  // Clear heartbeat timer
+  // Clear heartbeat timers
   if (heartbeatInterval) clearInterval(heartbeatInterval);
+  stopHeartbeat(registryHeartbeatTimer, projectDir, projectName);
 
   // Final summary
   manifest = await readManifest(projectDir);

@@ -8,6 +8,7 @@ import { checkForRunningInstance, writePidFile, removePidFile } from "./process-
 import { hasUncommittedChanges, ensureGitRepo } from "./git-manager.js";
 import { registerInstance, deregisterInstance, claimBotOwnership } from "./instance-registry.js";
 import { startSignalWatcher, stopSignalWatcher, clearSignal } from "./signal-handler.js";
+import { writeHeartbeat } from "./heartbeat.js";
 import { existsSync } from "node:fs";
 import { join, basename } from "node:path";
 import { Bot } from "grammy";
@@ -251,6 +252,7 @@ async function main(): Promise<void> {
     if (signalWatcherTimer) {
       stopSignalWatcher(signalWatcherTimer);
     }
+    try { writeHeartbeat(projectDir, projectPrefix, null, "idle"); } catch { /* best effort */ }
     telegramBot?.stop();
     process.exit(0);
   };
@@ -260,6 +262,7 @@ async function main(): Promise<void> {
   // --- Uncaught Exception Handler ---
   process.on("uncaughtException", async (err) => {
     console.error(`\n💥 Uncaught exception: ${err.message}`);
+    try { writeHeartbeat(projectDir, projectPrefix, null, "error"); } catch { /* best effort */ }
     try {
       removePidFile(projectDir);
     } catch {

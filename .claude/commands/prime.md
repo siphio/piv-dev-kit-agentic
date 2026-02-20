@@ -85,15 +85,35 @@ Run every time (even on existing manifests):
 6. **Write reconciled manifest back to `.agents/manifest.yaml`**
 7. **Update `last_updated` timestamp** (ISO 8601)
 
+### 0b-evo. Evolution Context Loading
+
+> Run this step after Step 0b reconciliation if an `evolution` section is present in the manifest.
+
+**Check for `evolution` section in manifest.** If present:
+
+1. **Load gen 1 PRD** — read `artifacts.prd.path`. Scan for the "Summary" or "Overview" section (first 80 lines). Store as FOUNDATION context.
+2. **Load PRD2** — read `artifacts.prd2.path` (or `evolution.prd2_path`). Read in full — this is the active requirements document.
+3. **Note the current generation** — `evolution.generation` — and which phases belong to gen 2 (`evolution.gen2_phases`).
+4. **Check `research.pending`** — read pending technologies list. These are unresearched techs from PRD2 that must be profiled before planning can begin.
+
+Store all of this for use in the output report and next-action determination.
+
+If `evolution` section is absent, skip this step — standard single-PRD behavior.
+
 ### 0c. Coverage Gap Detection
 
-1. Identify the next unfinished phase from manifest (first phase where `plan` is `not_started` or `execution` is `not_started`)
-2. Read the PRD phase section for that phase to extract technologies referenced
-3. Cross-reference those technologies against existing profile entries in manifest
-4. Flag:
+1. **Determine active PRD:**
+   - If `evolution` section exists → active PRD is PRD2 (`artifacts.prd2.path`)
+   - Otherwise → active PRD is gen 1 PRD (`artifacts.prd.path`)
+2. Identify the next unfinished phase from manifest (first phase where `plan` is `not_started` or `execution` is `not_started`)
+3. Read the active PRD phase section for that phase to extract technologies referenced
+4. Cross-reference those technologies against existing profile entries in manifest
+5. **Also check `research.pending`** — if any entries exist, add them to coverage gaps (these are PRD2 technologies with no profile yet)
+6. Flag:
+   - **Pending research** (evolution mode): Technology in `research.pending` list — must be researched before planning
    - **Missing profiles**: Technology referenced in phase but no profile exists
    - **Stale profiles**: Profile exists but `freshness: stale`
-5. Store coverage gaps for use in the output report and next-action recommendation
+7. Store coverage gaps for use in the output report and next-action recommendation
 
 ### 0d. Failure Assessment
 
@@ -130,7 +150,8 @@ On Linux, run: `tree -L 3 -I 'node_modules|__pycache__|.git|dist|build'`
 
 - Read CLAUDE.md or similar global rules file
 - Read README files at project root and major directories
-- Read `.agents/PRD.md` or `PRD.md` (if exists)
+- **If `evolution` section in manifest:** Read PRD2 in full (active requirements). Read first 80 lines of gen 1 PRD (foundation context). Do NOT read gen 1 PRD in full — only the summary.
+- **Otherwise:** Read `.agents/PRD.md` or `PRD.md` (if exists)
 - Read any architecture documentation in root or docs/
 
 **Skip these unless arguments explicitly request references:**
@@ -225,6 +246,17 @@ Provide a concise summary covering:
 - Latest validation: [date and result or "none"]
 - Progress tracking: [`.agents/progress/` status or "no active execution"]
 
+### Evolution Status (If `evolution` Section in Manifest)
+
+Include this section only when the manifest has an `evolution` block:
+
+- **Generation:** [N] (Gen [N-1] complete → Gen [N] in progress)
+- **Gen 1 PRD:** [path] — [N] phases, all validated ✅
+- **Gen 2 PRD:** [path] — [N] phases, [N] not started / [N] in progress
+- **Phase range:** Gen 1 phases [1–N], Gen 2 phases [N+1–M]
+- **Research pending:** [list of techs needing profiling, or "none — all profiles current"]
+- **Current focus:** Phase [gen2_start] — [phase name from PRD2]
+
 ### Core Principles
 - Code style and conventions observed
 - Documentation standards
@@ -243,6 +275,7 @@ Report:
 - Reconciliation results: [N files matched, N warnings]
 - Profile freshness: [N fresh, N stale, N missing]
 - Coverage gaps: [list or "none"]
+- Research pending (evolution): [list of techs, or "none"]
 - Active checkpoints: [list with tag name and phase, or "none"]
 - Pending failures: [list with error_category, retry count/max, details — or "none"]
 - Pending notifications: [list with type, severity, details — or "none"]
@@ -256,8 +289,10 @@ Report:
 1. **Pending failure + retries remaining?** → "Retry `/execute` — fix [details from failure entry]"
 2. **Pending failure + no retries remaining?** → "Rollback to checkpoint `[tag]` and escalate — [details]"
 3. **Active checkpoint + no failure?** → "Execution interrupted — resume `/execute [plan path]`"
+3b. **Evolution: `research.pending` non-empty?** → "Run `/research-stack [prd2_path]` to profile new technologies: [list]" (triggers when: `evolution` section exists AND `research.pending` has entries)
 4. Stale or missing profiles needed for next phase? → "Run `/research-stack --refresh` to update stale profiles" or "Run `/research-stack` to generate missing profiles" (also covers `stale_artifact` error category)
 5. No PRD? → "Run `/create-prd` to define requirements"
+5b. **Evolution: gen 1 complete, no PRD2 registered?** → "Run `/evolve [prd2_path]` to register your gen 2 PRD and continue development" (triggers when: all gen 1 phases validated AND no `evolution` section in manifest)
 6. Next phase has no plan? → "Run `/plan-feature \"Phase N: Name\"` to start planning"
 7. Plan exists, not executed? → "Run `/execute .agents/plans/[plan].md`"
 8. Executed, not validated? → "Run `/validate-implementation`"
