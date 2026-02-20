@@ -58,7 +58,7 @@ export interface MonitorConfig {
 }
 
 export interface RecoveryAction {
-  type: "restart" | "restart_with_preamble" | "escalate" | "skip";
+  type: "restart" | "restart_with_preamble" | "escalate" | "diagnose" | "skip";
   project: RegistryProject;
   stallType: StallType;
   details: string;
@@ -73,6 +73,11 @@ export interface ImprovementLogEntry {
   action: string;
   outcome: string;
   details: string;
+  bugLocation?: BugLocation;
+  rootCause?: string;
+  filePath?: string;
+  fixApplied?: boolean;
+  propagatedTo?: string[];
 }
 
 export interface SupervisorTelegramConfig {
@@ -85,4 +90,57 @@ export interface MonitorCycleResult {
   stalled: number;
   recovered: number;
   escalated: number;
+  interventionsAttempted: number;
+}
+
+// --- Phase 7: Diagnosis, Hot Fix & Propagation ---
+
+export type BugLocation = "framework_bug" | "project_bug" | "human_required";
+
+export interface DiagnosticResult {
+  bugLocation: BugLocation;
+  confidence: "high" | "medium" | "low";
+  rootCause: string;
+  filePath: string | null;
+  errorCategory: string;
+  multiProjectPattern: boolean;
+  affectedProjects: string[];
+}
+
+export interface HotFixResult {
+  success: boolean;
+  filePath: string;
+  linesChanged: number;
+  validationPassed: boolean;
+  revertedOnFailure: boolean;
+  details: string;
+  sessionCostUsd: number;
+}
+
+export interface PropagationResult {
+  project: string;
+  success: boolean;
+  filesCopied: string[];
+  newVersion: string;
+  orchestratorRestarted: boolean;
+  error?: string;
+}
+
+export interface InterventionResult {
+  project: string;
+  phase: number | null;
+  diagnostic: DiagnosticResult;
+  fix: HotFixResult | null;
+  propagation: PropagationResult[];
+  escalated: boolean;
+  totalCostUsd: number;
+}
+
+export interface InterventorConfig {
+  devKitDir: string;
+  diagnosisBudgetUsd: number;
+  fixBudgetUsd: number;
+  diagnosisMaxTurns: number;
+  fixMaxTurns: number;
+  timeoutMs: number;
 }

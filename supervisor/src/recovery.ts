@@ -48,7 +48,8 @@ export function determineRecovery(
       return { ...base, type: "restart_with_preamble" };
 
     case "execution_error":
-      return { ...base, type: "escalate" };
+      // Phase 7: Diagnose before escalating
+      return { ...base, type: "diagnose" };
 
     default:
       return { ...base, type: "escalate" };
@@ -170,6 +171,11 @@ export async function executeRecovery(
       }
       return `Escalation required but no Telegram configured — logged locally only`;
     }
+
+    case "diagnose":
+      // Diagnosis is handled by the monitor loop (interventor integration)
+      // This case is returned as a marker for the monitor to dispatch
+      return "Diagnosis requested — delegated to interventor";
 
     case "skip":
       return "No action needed";

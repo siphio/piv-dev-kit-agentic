@@ -107,14 +107,14 @@ describe("determineRecovery", () => {
     expect(action.restartCount).toBe(3);
   });
 
-  it("execution_error → always escalate", () => {
+  it("execution_error → diagnose action (Phase 7)", () => {
     const classification = makeClassification({ stallType: "execution_error" });
 
     const action0 = determineRecovery(classification, 0, 3);
-    expect(action0.type).toBe("escalate");
+    expect(action0.type).toBe("diagnose");
 
     const action5 = determineRecovery(classification, 5, 3);
-    expect(action5.type).toBe("escalate");
+    expect(action5.type).toBe("diagnose");
   });
 });
 
@@ -142,6 +142,23 @@ describe("executeRecovery", () => {
     expect(spawn).toHaveBeenCalled();
     expect(outcome).toContain("restarted orchestrator");
     expect(outcome).toContain("12345");
+  });
+
+  it("diagnose action returns delegation message", async () => {
+    const project = makeProject();
+    const action: RecoveryAction = {
+      type: "diagnose",
+      project,
+      stallType: "execution_error",
+      details: "Pending failures in manifest",
+      restartCount: 0,
+    };
+    const config = makeConfig();
+
+    const outcome = await executeRecovery(action, config);
+
+    expect(outcome).toContain("Diagnosis requested");
+    expect(outcome).toContain("interventor");
   });
 
   it("escalate action calls telegramSendEscalation when configured", async () => {

@@ -1,7 +1,7 @@
 // PIV Supervisor — Direct HTTP Telegram Client
 // Uses fetch + @grammyjs/types for type safety. No framework dependency.
 
-import type { SupervisorTelegramConfig, StallType } from "./types.js";
+import type { SupervisorTelegramConfig, StallType, DiagnosticResult, HotFixResult } from "./types.js";
 
 const TELEGRAM_BASE = "https://api.telegram.org";
 const MAX_MESSAGE_LENGTH = 4096;
@@ -151,6 +151,35 @@ export async function telegramSendEscalation(
     `<b>Details:</b> ${escapeHtml(details)}`,
     `<b>Action Taken:</b> ${escapeHtml(actionTaken)}`,
     `<b>Restarts:</b> ${restartCount}/${maxRestarts}`,
+  ].join("\n");
+
+  return telegramSendMessage(config, message, "HTML");
+}
+
+/**
+ * Send a structured fix-failure escalation message.
+ * Phase 7: Rich escalation with diagnosis and fix details.
+ */
+export async function telegramSendFixFailure(
+  config: SupervisorTelegramConfig,
+  project: string,
+  phase: number | null,
+  diagnostic: DiagnosticResult,
+  fixResult: HotFixResult,
+): Promise<TelegramApiResponse<TelegramMessage>> {
+  const message = [
+    `<b>🔴 Hot Fix Failed — Escalation</b>`,
+    ``,
+    `<b>Project:</b> ${escapeHtml(project)}`,
+    `<b>Phase:</b> ${phase ?? "unknown"}`,
+    `<b>Bug Type:</b> ${escapeHtml(diagnostic.bugLocation)}`,
+    `<b>Root Cause:</b> ${escapeHtml(diagnostic.rootCause)}`,
+    `<b>File:</b> ${escapeHtml(diagnostic.filePath ?? "unknown")}`,
+    `<b>Fix Attempted:</b> ${escapeHtml(fixResult.details)}`,
+    `<b>Validation:</b> ${fixResult.validationPassed ? "Passed" : "Failed"}`,
+    `<b>Fix Cost:</b> $${fixResult.sessionCostUsd.toFixed(2)}`,
+    ``,
+    `<b>Action needed:</b> Manual fix required. ${fixResult.revertedOnFailure ? "Fix was reverted." : ""}`,
   ].join("\n");
 
   return telegramSendMessage(config, message, "HTML");

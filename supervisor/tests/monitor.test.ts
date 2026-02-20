@@ -15,10 +15,40 @@ vi.mock("../src/classifier.js", () => ({
 vi.mock("../src/recovery.js", () => ({
   determineRecovery: vi.fn(),
   executeRecovery: vi.fn(),
+  killProcess: vi.fn(() => Promise.resolve(true)),
+  spawnOrchestrator: vi.fn(() => ({ pid: 12345, unref: vi.fn() })),
 }));
 
 vi.mock("../src/improvement-log.js", () => ({
   appendToImprovementLog: vi.fn(),
+}));
+
+vi.mock("../src/config.js", () => ({
+  loadInterventorConfig: vi.fn(() => ({
+    devKitDir: "/tmp/dev-kit",
+    diagnosisBudgetUsd: 0.5,
+    fixBudgetUsd: 2.0,
+    diagnosisMaxTurns: 15,
+    fixMaxTurns: 30,
+    timeoutMs: 300000,
+  })),
+}));
+
+vi.mock("../src/interventor.js", () => ({
+  diagnoseStall: vi.fn(),
+  classifyBugLocation: vi.fn(),
+  applyFrameworkHotFix: vi.fn(),
+  applyProjectFix: vi.fn(),
+  shouldEscalate: vi.fn(),
+}));
+
+vi.mock("../src/propagator.js", () => ({
+  propagateFixToProjects: vi.fn(() => []),
+  getOutdatedProjects: vi.fn(() => []),
+}));
+
+vi.mock("../src/telegram.js", () => ({
+  telegramSendFixFailure: vi.fn(() => Promise.resolve({ ok: true })),
 }));
 
 import { runMonitorCycle } from "../src/monitor.js";
@@ -33,6 +63,8 @@ import { readCentralRegistry, writeCentralRegistry } from "../src/registry.js";
 import { classifyStall } from "../src/classifier.js";
 import { determineRecovery, executeRecovery } from "../src/recovery.js";
 import { appendToImprovementLog } from "../src/improvement-log.js";
+import { diagnoseStall, classifyBugLocation, shouldEscalate, applyFrameworkHotFix } from "../src/interventor.js";
+import type { DiagnosticResult, HotFixResult } from "../src/types.js";
 
 let tmpDir: string;
 
@@ -139,7 +171,7 @@ describe("runMonitorCycle", () => {
     expect(executeRecovery).toHaveBeenCalledTimes(1);
   });
 
-  it("escalates on execution_error", async () => {
+  it("diagnoses and escalates on execution_error when shouldEscalate is true", async () => {
     const errorProject = makeProject({ name: "error-proj" });
     vi.mocked(readCentralRegistry).mockReturnValue(
       makeRegistry([errorProject]),
@@ -154,17 +186,27 @@ describe("runMonitorCycle", () => {
     };
     vi.mocked(classifyStall).mockReturnValue(errorClassification);
 
-    const escalateAction: RecoveryAction = {
-      type: "escalate",
+    const diagnoseAction: RecoveryAction = {
+      type: "diagnose",
       project: errorProject,
       stallType: "execution_error",
       details: "PID alive, 2 pending failure(s) in manifest",
       restartCount: 0,
     };
-    vi.mocked(determineRecovery).mockReturnValue(escalateAction);
-    vi.mocked(executeRecovery).mockResolvedValue(
-      "Escalation required but no Telegram configured",
-    );
+    vi.mocked(determineRecovery).mockReturnValue(diagnoseAction);
+
+    const mockDiagnostic: DiagnosticResult = {
+      bugLocation: "human_required",
+      confidence: "high",
+      rootCause: "Missing API key",
+      filePath: null,
+      errorCategory: "integration_auth",
+      multiProjectPattern: false,
+      affectedProjects: ["error-proj"],
+    };
+    vi.mocked(diagnoseStall).mockResolvedValue(mockDiagnostic);
+    vi.mocked(classifyBugLocation).mockReturnValue(mockDiagnostic);
+    vi.mocked(shouldEscalate).mockReturnValue(true);
 
     const result = await runMonitorCycle(makeConfig(tmpDir));
 
@@ -172,6 +214,66 @@ describe("runMonitorCycle", () => {
     expect(result.stalled).toBe(1);
     expect(result.recovered).toBe(0);
     expect(result.escalated).toBe(1);
+    expect(result.interventionsAttempted).toBe(1);
+    expect(diagnoseStall).toHaveBeenCalledTimes(1);
+  });
+
+  it("diagnoses and fixes framework bug on execution_error", async () => {
+    const errorProject = makeProject({ name: "fix-proj" });
+    vi.mocked(readCentralRegistry).mockReturnValue(
+      makeRegistry([errorProject]),
+    );
+
+    const errorClassification: StallClassification = {
+      project: errorProject,
+      stallType: "execution_error",
+      confidence: "high",
+      details: "PID alive, 1 pending failure in manifest",
+      heartbeatAgeMs: 1500000,
+    };
+    vi.mocked(classifyStall).mockReturnValue(errorClassification);
+
+    const diagnoseAction: RecoveryAction = {
+      type: "diagnose",
+      project: errorProject,
+      stallType: "execution_error",
+      details: "PID alive, 1 pending failure in manifest",
+      restartCount: 0,
+    };
+    vi.mocked(determineRecovery).mockReturnValue(diagnoseAction);
+
+    const mockDiagnostic: DiagnosticResult = {
+      bugLocation: "framework_bug",
+      confidence: "high",
+      rootCause: "Null check missing",
+      filePath: ".claude/orchestrator/src/hooks-parser.ts",
+      errorCategory: "syntax_error",
+      multiProjectPattern: false,
+      affectedProjects: ["fix-proj"],
+    };
+    vi.mocked(diagnoseStall).mockResolvedValue(mockDiagnostic);
+    vi.mocked(classifyBugLocation).mockReturnValue(mockDiagnostic);
+    vi.mocked(shouldEscalate).mockReturnValue(false);
+
+    const mockFix: HotFixResult = {
+      success: true,
+      filePath: ".claude/orchestrator/src/hooks-parser.ts",
+      linesChanged: 5,
+      validationPassed: true,
+      revertedOnFailure: false,
+      details: "Added null check",
+      sessionCostUsd: 0.25,
+    };
+    vi.mocked(applyFrameworkHotFix).mockResolvedValue(mockFix);
+
+    const result = await runMonitorCycle(makeConfig(tmpDir));
+
+    expect(result.projectsChecked).toBe(1);
+    expect(result.stalled).toBe(1);
+    expect(result.recovered).toBe(1);
+    expect(result.escalated).toBe(0);
+    expect(result.interventionsAttempted).toBe(1);
+    expect(applyFrameworkHotFix).toHaveBeenCalledTimes(1);
   });
 
   it("handles empty registry gracefully", async () => {
