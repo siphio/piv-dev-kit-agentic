@@ -1,12 +1,13 @@
 // PIV Orchestrator — Manifest-Driven State Machine
 
-import type {
-  Manifest,
-  NextAction,
-  FailureEntry,
-  FailureSeverity,
-  CheckpointEntry,
-  PhaseStatus,
+import {
+  resolveProfiles,
+  type Manifest,
+  type NextAction,
+  type FailureEntry,
+  type FailureSeverity,
+  type CheckpointEntry,
+  type PhaseStatus,
 } from "./types.js";
 import { getSeverity } from "./error-classifier.js";
 
@@ -140,7 +141,8 @@ export function determineNextAction(manifest: Manifest): NextAction {
   }
 
   // 4a: No profiles at all → research-stack
-  if (!manifest.profiles || Object.keys(manifest.profiles).length === 0) {
+  const profiles = resolveProfiles(manifest);
+  if (Object.keys(profiles).length === 0) {
     return {
       command: "research-stack",
       reason: "No technology profiles — run research before planning",
@@ -149,7 +151,7 @@ export function determineNextAction(manifest: Manifest): NextAction {
   }
 
   // 4b: Stale profiles → research-stack --refresh
-  const staleProfiles = Object.entries(manifest.profiles)
+  const staleProfiles = Object.entries(profiles)
     .filter(([_, p]) => p.freshness === "stale")
     .map(([name]) => name);
   if (staleProfiles.length > 0) {

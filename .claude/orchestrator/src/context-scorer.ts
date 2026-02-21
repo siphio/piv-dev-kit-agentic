@@ -1,6 +1,6 @@
 // PIV Orchestrator — Context Quality Scorer (F4)
 
-import type { ContextScore, Manifest } from "./types.js";
+import { resolveProfiles, type ContextScore, type Manifest } from "./types.js";
 
 /**
  * Score /prime output against manifest expectations (0-10).
@@ -43,7 +43,7 @@ export function scoreContext(
   }
 
   // Profiles found (+2)
-  const profileNames = Object.keys(manifest.profiles ?? {});
+  const profileNames = Object.keys(resolveProfiles(manifest));
   const profilesFound: string[] = [];
   for (const name of profileNames) {
     if (primeOutput.toLowerCase().includes(name.toLowerCase())) {

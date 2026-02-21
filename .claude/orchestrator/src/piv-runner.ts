@@ -20,14 +20,15 @@ import { checkFidelity, formatFidelityReport } from "./fidelity-checker.js";
 import { runRegressionTests } from "./drift-detector.js";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat.js";
 import { basename } from "node:path";
-import type {
-  SessionResult,
-  FailureEntry,
-  CheckpointEntry,
-  Manifest,
-  PivCommand,
-  BudgetContext,
-  ProgressCallback,
+import {
+  resolveProfiles,
+  type SessionResult,
+  type FailureEntry,
+  type CheckpointEntry,
+  type Manifest,
+  type PivCommand,
+  type BudgetContext,
+  type ProgressCallback,
 } from "./types.js";
 import type { TelegramNotifier } from "./telegram-notifier.js";
 
@@ -82,7 +83,8 @@ function getLastResult(results: SessionResult[]): SessionResult {
 }
 
 function checkProfilesNeeded(manifest: Manifest): { needed: boolean; reason: string } {
-  if (!manifest.profiles || Object.keys(manifest.profiles).length === 0) {
+  const profiles = resolveProfiles(manifest);
+  if (Object.keys(profiles).length === 0) {
     return { needed: true, reason: "No technology profiles found" };
   }
   // Check for pending research from /evolve
@@ -90,7 +92,7 @@ function checkProfilesNeeded(manifest: Manifest): { needed: boolean; reason: str
   if (pendingResearch.length > 0) {
     return { needed: true, reason: `Pending research: ${pendingResearch.join(", ")}` };
   }
-  const staleProfiles = Object.entries(manifest.profiles)
+  const staleProfiles = Object.entries(profiles)
     .filter(([_, p]) => p.freshness === "stale")
     .map(([name]) => name);
   if (staleProfiles.length > 0) {

@@ -174,9 +174,47 @@ export interface ManifestSettings {
   agent_teams: string;
 }
 
+export interface ResearchProfileEntry {
+  name: string;
+  path: string;
+  generated_at: string;
+  freshness: "fresh" | "stale";
+  used_in_phases?: number[];
+}
+
 export interface ResearchEntry {
   pending: string[];
   satisfied: string[];
+  profiles?: ResearchProfileEntry[];
+}
+
+/**
+ * Resolve profiles from either top-level `profiles` (Record) or
+ * `research.profiles` (array). Returns a normalized Record<string, ProfileEntry>.
+ * Handles the format mismatch between /prime (writes research.profiles as array)
+ * and the orchestrator (expects top-level Record).
+ */
+export function resolveProfiles(manifest: Manifest): Record<string, ProfileEntry> {
+  // Prefer top-level profiles if present
+  if (manifest.profiles && Object.keys(manifest.profiles).length > 0) {
+    return manifest.profiles;
+  }
+  // Fall back to research.profiles array → convert to Record
+  const researchProfiles = manifest.research?.profiles;
+  if (!researchProfiles || researchProfiles.length === 0) {
+    return {};
+  }
+  const result: Record<string, ProfileEntry> = {};
+  for (const p of researchProfiles) {
+    result[p.name] = {
+      path: p.path,
+      generated_at: p.generated_at,
+      status: "complete",
+      freshness: p.freshness,
+      used_in_phases: p.used_in_phases ?? [],
+    };
+  }
+  return result;
 }
 
 export interface Manifest {
