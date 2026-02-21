@@ -161,7 +161,17 @@ export function determineNextAction(manifest: Manifest): NextAction {
     };
   }
 
-  // 4c: Preflight not run or blocked → preflight
+  // 4c: Pending research from /evolve → research-stack
+  const pendingResearch = manifest.research?.pending ?? [];
+  if (pendingResearch.length > 0) {
+    return {
+      command: "research-stack",
+      reason: `Pending research for new technologies: ${pendingResearch.join(", ")}`,
+      confidence: "high",
+    };
+  }
+
+  // 4d: Preflight not run or blocked → preflight
   if (!manifest.preflight || manifest.preflight.status === "blocked") {
     return {
       command: "preflight",

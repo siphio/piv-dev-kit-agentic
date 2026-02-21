@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { writeHeartbeat, startHeartbeat, stopHeartbeat } from "../src/heartbeat.js";
-import { mkdtempSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { writeHeartbeat, startHeartbeat, stopHeartbeat, HEARTBEAT_INTERVAL_MS } from "../src/heartbeat.js";
+import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import yaml from "js-yaml";
 import os from "node:os";
@@ -63,6 +63,49 @@ describe("writeHeartbeat", () => {
     expect(() => {
       writeHeartbeat(projectDir, "test", 1, "running", "/proc/fake/path/registry.yaml");
     }).not.toThrow();
+  });
+
+  it("updates existing entry by path instead of creating a duplicate", () => {
+    // Simulate piv-init registering with a display name
+    const initRegistry = {
+      projects: {
+        "My Display Name": {
+          name: "My Display Name",
+          path: projectDir,
+          status: "idle",
+          heartbeat: "2026-02-20T00:00:00.000Z",
+          currentPhase: null,
+          pivCommandsVersion: "1.0.0",
+          orchestratorPid: null,
+          registeredAt: "2026-02-20T00:00:00.000Z",
+          lastCompletedPhase: null,
+        },
+      },
+      lastUpdated: "2026-02-20T00:00:00.000Z",
+    };
+    writeFileSync(registryPath, yaml.dump(initRegistry), "utf-8");
+
+    // Heartbeat uses basename as projectName — should find by path, not create duplicate
+    writeHeartbeat(projectDir, "project", 1, "running", registryPath);
+
+    const content = yaml.load(readFileSync(registryPath, "utf-8")) as Record<string, unknown>;
+    const projects = content.projects as Record<string, Record<string, unknown>>;
+
+    // Should have only one entry (under the original key)
+    expect(Object.keys(projects)).toHaveLength(1);
+    expect(projects["My Display Name"]).toBeDefined();
+    expect(projects["project"]).toBeUndefined();
+
+    // Should have updated the existing entry
+    expect(projects["My Display Name"].currentPhase).toBe(1);
+    expect(projects["My Display Name"].status).toBe("running");
+    expect(projects["My Display Name"].orchestratorPid).toBe(process.pid);
+  });
+});
+
+describe("HEARTBEAT_INTERVAL_MS", () => {
+  it("is 2 minutes", () => {
+    expect(HEARTBEAT_INTERVAL_MS).toBe(2 * 60 * 1000);
   });
 });
 

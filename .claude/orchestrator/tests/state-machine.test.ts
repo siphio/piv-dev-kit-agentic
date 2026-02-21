@@ -411,7 +411,48 @@ describe("determineNextAction", () => {
       preflight: undefined,
     };
     const action = determineNextAction(manifest);
-    // research-stack (4a) fires before preflight (4c)
+    // research-stack (4a) fires before preflight (4d)
     expect(action.command).toBe("research-stack");
+  });
+
+  it("recommends research-stack when research.pending has entries", () => {
+    const manifest: Manifest = {
+      ...baseManifest(),
+      research: {
+        pending: ["playwright"],
+        satisfied: [],
+      },
+    };
+    const action = determineNextAction(manifest);
+    expect(action.command).toBe("research-stack");
+    expect(action.reason).toContain("playwright");
+  });
+
+  it("skips research.pending check when pending is empty", () => {
+    const manifest: Manifest = {
+      ...baseManifest(),
+      research: {
+        pending: [],
+        satisfied: ["claude-agent-sdk"],
+      },
+    };
+    const action = determineNextAction(manifest);
+    // Should proceed to phase progression, not research-stack
+    expect(action.command).not.toBe("research-stack");
+  });
+
+  it("recommends research-stack for pending research even when profiles are fresh", () => {
+    const manifest: Manifest = {
+      ...baseManifest(),
+      research: {
+        pending: ["playwright", "redis"],
+        satisfied: [],
+      },
+    };
+    // baseManifest() has fresh profiles — pending research should still trigger
+    const action = determineNextAction(manifest);
+    expect(action.command).toBe("research-stack");
+    expect(action.reason).toContain("playwright");
+    expect(action.reason).toContain("redis");
   });
 });

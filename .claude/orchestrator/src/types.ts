@@ -174,11 +174,17 @@ export interface ManifestSettings {
   agent_teams: string;
 }
 
+export interface ResearchEntry {
+  pending: string[];
+  satisfied: string[];
+}
+
 export interface Manifest {
   prd?: PrdEntry;
   phases: Record<number, PhaseStatus>;
   settings: ManifestSettings;
-  profiles: Record<string, ProfileEntry>;
+  profiles?: Record<string, ProfileEntry>;
+  research?: ResearchEntry;
   plans?: PlanEntry[];
   executions?: ExecutionEntry[];
   validations?: ValidationEntry[];

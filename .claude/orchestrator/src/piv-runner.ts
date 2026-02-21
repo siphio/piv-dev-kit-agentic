@@ -85,6 +85,11 @@ function checkProfilesNeeded(manifest: Manifest): { needed: boolean; reason: str
   if (!manifest.profiles || Object.keys(manifest.profiles).length === 0) {
     return { needed: true, reason: "No technology profiles found" };
   }
+  // Check for pending research from /evolve
+  const pendingResearch = manifest.research?.pending ?? [];
+  if (pendingResearch.length > 0) {
+    return { needed: true, reason: `Pending research: ${pendingResearch.join(", ")}` };
+  }
   const staleProfiles = Object.entries(manifest.profiles)
     .filter(([_, p]) => p.freshness === "stale")
     .map(([name]) => name);

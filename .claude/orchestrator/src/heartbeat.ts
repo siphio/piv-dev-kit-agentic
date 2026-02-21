@@ -88,7 +88,7 @@ function readCurrentPhase(projectDir: string): number | null {
 
 // --- Public API ---
 
-const DEFAULT_INTERVAL_MS = 2 * 60 * 1000; // 2 minutes
+export const HEARTBEAT_INTERVAL_MS = 2 * 60 * 1000; // 2 minutes
 
 /**
  * Write a single heartbeat to the central registry.
@@ -103,7 +103,17 @@ export function writeHeartbeat(
 ): void {
   try {
     const registry = readRegistry(registryPath);
-    const existing = registry.projects[projectName];
+
+    // Look up by path first (handles piv-init vs basename key mismatch)
+    let registryKey = projectName;
+    for (const [key, entry] of Object.entries(registry.projects)) {
+      if (entry.path === projectDir) {
+        registryKey = key;
+        break;
+      }
+    }
+
+    const existing = registry.projects[registryKey];
 
     if (existing) {
       existing.heartbeat = new Date().toISOString();
@@ -112,8 +122,8 @@ export function writeHeartbeat(
       existing.status = status;
     } else {
       // Project not registered yet — create minimal entry
-      registry.projects[projectName] = {
-        name: projectName,
+      registry.projects[registryKey] = {
+        name: registryKey,
         path: projectDir,
         status,
         heartbeat: new Date().toISOString(),
@@ -141,7 +151,7 @@ export function startHeartbeat(
   intervalMs?: number,
   registryPath?: string
 ): NodeJS.Timeout {
-  const interval = intervalMs ?? DEFAULT_INTERVAL_MS;
+  const interval = intervalMs ?? HEARTBEAT_INTERVAL_MS;
 
   // Write initial heartbeat immediately
   const phase = readCurrentPhase(projectDir);

@@ -11,6 +11,7 @@ const __dirname = dirname(__filename);
 
 const DEFAULT_INTERVAL_MS = 15 * 60 * 1000;      // 15 minutes
 const DEFAULT_HEARTBEAT_STALE_MS = 15 * 60 * 1000; // 15 minutes
+const MIN_HEARTBEAT_STALE_MS = 6 * 60 * 1000;      // 3x heartbeat interval (2 min)
 const DEFAULT_MAX_RESTART_ATTEMPTS = 3;
 
 /**
@@ -27,9 +28,14 @@ export function loadMonitorConfig(): MonitorConfig {
   const chatIdRaw = process.env.TELEGRAM_CHAT_ID;
   const telegramChatId = chatIdRaw ? parseInt(chatIdRaw, 10) : undefined;
 
+  const resolvedStaleMs = isNaN(heartbeatStaleMs) ? DEFAULT_HEARTBEAT_STALE_MS : heartbeatStaleMs;
+  if (resolvedStaleMs < MIN_HEARTBEAT_STALE_MS) {
+    console.error(`⚠️ PIV_HEARTBEAT_STALE_MS=${resolvedStaleMs}ms is below minimum safe threshold (${MIN_HEARTBEAT_STALE_MS}ms = 3× heartbeat interval). Clamping to ${MIN_HEARTBEAT_STALE_MS}ms.`);
+  }
+
   return {
     intervalMs: isNaN(intervalMs) ? DEFAULT_INTERVAL_MS : intervalMs,
-    heartbeatStaleMs: isNaN(heartbeatStaleMs) ? DEFAULT_HEARTBEAT_STALE_MS : heartbeatStaleMs,
+    heartbeatStaleMs: Math.max(resolvedStaleMs, MIN_HEARTBEAT_STALE_MS),
     maxRestartAttempts: isNaN(maxRestartAttempts) ? DEFAULT_MAX_RESTART_ATTEMPTS : maxRestartAttempts,
     registryPath: process.env.PIV_REGISTRY_PATH,
     telegramToken,
