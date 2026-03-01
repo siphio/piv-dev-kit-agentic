@@ -151,3 +151,6 @@ export function updatePhaseStatus(
 export function setNextAction(manifest: Manifest, action: NextAction): Manifest {
   return { ...manifest, next_action: action };
 }
+
+// Re-export monorepo-resolver slice operations for convenience
+export { updateSliceStatus } from "./monorepo-resolver.js";

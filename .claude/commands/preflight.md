@@ -34,6 +34,15 @@ For each technology, read its profile from `.agents/reference/`:
 
 Compile a complete list of required environment variables.
 
+**Monorepo Infrastructure Scanning (if `project.structure: context-monorepo`):**
+If the manifest has `project.structure: context-monorepo`:
+1. Scan ALL `context/modules/*/slices/*/context.md` files
+2. Extract Infrastructure Requirements tables from each
+3. Deduplicate services (e.g., PostGIS required by 3 slices = 1 instance)
+4. Extract technology profiles needed
+5. Compile unified credential/infrastructure checklist
+6. Merge with PRD-sourced credentials (both paths active)
+
 **CRITICAL — Auth exclusion rule:**
 `ANTHROPIC_API_KEY` is NEVER required. The PIV orchestrator uses the Claude Agent SDK which spawns the `claude` CLI as a subprocess — the CLI handles its own authentication via the user's OAuth token (Claude Max subscription). Do NOT list `ANTHROPIC_API_KEY` as a required credential, do NOT include it in the `.env` template, and do NOT flag it as missing. This applies to any variable that would authenticate directly with the Anthropic API — the subprocess handles all Anthropic auth transparently.
 

@@ -99,7 +99,8 @@ export function calculateFidelityScore(
 export function checkFidelity(
   projectDir: string,
   planPath: string,
-  phase: number
+  phase: number,
+  moduleSlice?: { module: string; slice: string }
 ): FidelityReport {
   // Read plan content
   let planContent: string;
@@ -121,22 +122,40 @@ export function checkFidelity(
 
   const plannedFiles = extractPlannedFiles(planContent);
 
-  // Find checkpoint tag for this phase
-  const checkpointTag = `piv-checkpoint/phase-${phase}`;
+  // Find checkpoint tag — try module-based tag first, fall back to phase-based
   let sinceTag: string | undefined;
-  try {
-    const tags = execFileSync(
-      "git",
-      ["tag", "-l", `${checkpointTag}*`],
-      { cwd: projectDir, encoding: "utf-8", timeout: 5_000 }
-    ).trim();
-    if (tags) {
-      // Use the most recent matching tag
-      const tagList = tags.split("\n").sort();
-      sinceTag = tagList[tagList.length - 1];
+  if (moduleSlice) {
+    const moduleTag = `piv-checkpoint/${moduleSlice.module}-${moduleSlice.slice}`;
+    try {
+      const tags = execFileSync(
+        "git",
+        ["tag", "-l", `${moduleTag}*`],
+        { cwd: projectDir, encoding: "utf-8", timeout: 5_000 }
+      ).trim();
+      if (tags) {
+        const tagList = tags.split("\n").sort();
+        sinceTag = tagList[tagList.length - 1];
+      }
+    } catch {
+      // Module-based tag not found — will fall through to phase-based
     }
-  } catch {
-    // No checkpoint tag found
+  }
+  if (!sinceTag) {
+    const checkpointTag = `piv-checkpoint/phase-${phase}`;
+    try {
+      const tags = execFileSync(
+        "git",
+        ["tag", "-l", `${checkpointTag}*`],
+        { cwd: projectDir, encoding: "utf-8", timeout: 5_000 }
+      ).trim();
+      if (tags) {
+        // Use the most recent matching tag
+        const tagList = tags.split("\n").sort();
+        sinceTag = tagList[tagList.length - 1];
+      }
+    } catch {
+      // No checkpoint tag found
+    }
   }
 
   const actualFiles = getActualChangedFiles(projectDir, sinceTag);

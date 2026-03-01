@@ -76,6 +76,53 @@ describe("mergeManifest", () => {
 
     expect(result.failures).toHaveLength(1);
   });
+
+  it("deep-merges modules at module level", () => {
+    const existing: Manifest = {
+      ...baseManifest(),
+      project: { name: "test", scaffolded_at: "2026-03-01", structure: "context-monorepo" },
+      modules: {
+        auth: {
+          specification: "context/modules/auth/specification.md",
+          status: "complete",
+          slices: {
+            "01": { plan: "not_started", execution: "not_started", validation: "not_run" },
+          },
+        },
+      },
+    };
+    const updates: Partial<Manifest> = {
+      modules: {
+        auth: {
+          specification: "context/modules/auth/specification.md",
+          status: "complete",
+          slices: {
+            "01": { plan: "complete", execution: "not_started", validation: "not_run" },
+          },
+        },
+      },
+    };
+    const result = mergeManifest(existing, updates);
+    // Module-level merge replaces the auth entry
+    expect(result.modules!.auth.slices["01"].plan).toBe("complete");
+  });
+
+  it("preserves project field across merges", () => {
+    const existing: Manifest = {
+      ...baseManifest(),
+      project: { name: "test", scaffolded_at: "2026-03-01", structure: "context-monorepo" },
+    };
+    const result = mergeManifest(existing, { last_updated: "2026-03-02" });
+    expect(result.project?.name).toBe("test");
+    expect(result.project?.structure).toBe("context-monorepo");
+  });
+
+  it("classic manifest without modules merges correctly", () => {
+    const existing = baseManifest();
+    const result = mergeManifest(existing, { last_updated: "2026-03-02" });
+    expect(result.modules).toBeUndefined();
+    expect(result.phases[1].plan).toBe("complete");
+  });
 });
 
 describe("appendFailure", () => {

@@ -15,14 +15,25 @@ import { resolveProfiles, type ContextScore, type Manifest } from "./types.js";
 export function scoreContext(
   primeOutput: string,
   manifest: Manifest,
-  expectedPhase?: number
+  expectedPhase?: number,
+  moduleSlice?: { module: string; slice: string }
 ): ContextScore {
   const details: string[] = [];
   let total = 0;
 
-  // PRD phase mentioned (+3)
+  // PRD phase / module-slice mentioned (+3)
   let prdPhaseLoaded = false;
-  if (expectedPhase !== undefined) {
+  if (moduleSlice) {
+    const moduleRegex = new RegExp(moduleSlice.module, "i");
+    const sliceRegex = new RegExp(moduleSlice.slice, "i");
+    if (moduleRegex.test(primeOutput) && sliceRegex.test(primeOutput)) {
+      prdPhaseLoaded = true;
+      total += 3;
+      details.push(`Module ${moduleSlice.module} / Slice ${moduleSlice.slice} loaded (+3)`);
+    } else {
+      details.push(`Module/slice NOT found in output (+0)`);
+    }
+  } else if (expectedPhase !== undefined) {
     const phasePattern = new RegExp(`Phase\\s+${expectedPhase}`, "i");
     if (phasePattern.test(primeOutput)) {
       prdPhaseLoaded = true;

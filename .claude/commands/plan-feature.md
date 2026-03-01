@@ -56,6 +56,10 @@ During Phase 5 (Strategic Thinking), reason step by step:
 Hooks are always enabled. `## PIV-Automator-Hooks` is appended to the plan file.
 
 If arguments contain `--reflect`, perform an extended reflection pass before finalizing.
+Strip `--module <value>` and `--slice <value>` from arguments.
+If both `--module` and `--slice` are present → monorepo slice planning mode.
+If neither → classic PRD phase planning mode (unchanged behavior).
+If only one present → output error: "Both --module and --slice are required for monorepo planning."
 Strip flags from arguments before using remaining text as the feature description.
 
 ## Planning Process
@@ -87,6 +91,32 @@ Strip flags from arguments before using remaining text as the feature descriptio
 
    **If no `evolution` section (standard mode):**
    - Proceed with normal PRD loading
+
+0b. **Detect Monorepo Slice Mode**
+
+   If `--module` and `--slice` flags are present:
+
+   **Monorepo Slice Planning Mode:**
+   1. Read `context/modules/{module}/specification.md` — module purpose, slice breakdown, data contracts
+   2. Read `context/modules/{module}/slices/{slice}/context.md` — PRIMARY context source:
+      - Technology decisions with rationale
+      - Schema design
+      - API design
+      - Infrastructure requirements
+      - Validation gates (measurable targets)
+      - Error handling patterns
+      - Test data requirements
+   3. Read `context/architecture.md` — dependency DAG, shared conventions
+   4. Read `context/vision.md` — project purpose (first 20 lines)
+   5. Cross-reference technology profiles in `.agents/reference/` for technologies listed in context.md
+   6. Skip PRD-based scope analysis (user stories, scenarios) — use slice context.md as the primary spec
+
+   In plan template output:
+   - Replace "PRD Phase" header → "Module {module} / Slice {slice}"
+   - Scenarios → validation gates from context.md
+   - Decision trees → technology decisions from context.md
+
+   **If neither flag present:** proceed with normal PRD-based flow (unchanged).
 
 1. **Validate Technology Profiles Exist**
    - Check if `.agents/reference/` directory exists

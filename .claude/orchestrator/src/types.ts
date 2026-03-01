@@ -217,7 +217,44 @@ export function resolveProfiles(manifest: Manifest): Record<string, ProfileEntry
   return result;
 }
 
+// --- Monorepo Types ---
+
+export interface SliceStatus {
+  plan: PlanStatus;
+  execution: ExecutionStatus;
+  validation: ValidationStatus;
+}
+
+export interface ModuleEntry {
+  specification: string;       // path to specification.md
+  status: "stub" | "complete";
+  slices: Record<string, SliceStatus>;
+}
+
+export interface ProjectInfo {
+  name: string;
+  scaffolded_at: string;
+  structure: "context-monorepo" | "classic";
+}
+
+export interface WorkUnit {
+  module: string;
+  slice: string;
+  sliceStatus: SliceStatus;
+  contextPath: string;         // path to slice context.md
+  specPath: string;            // path to module specification.md
+}
+
+/**
+ * Detect whether a manifest uses the context-monorepo structure.
+ */
+export function isMonorepoManifest(m: Manifest): boolean {
+  return m.project?.structure === "context-monorepo" && !!m.modules;
+}
+
 export interface Manifest {
+  project?: ProjectInfo;                        // NEW — set by /scaffold
+  modules?: Record<string, ModuleEntry>;        // NEW — monorepo mode
   prd?: PrdEntry;
   phases: Record<number, PhaseStatus>;
   settings: ManifestSettings;

@@ -22,6 +22,7 @@ import { startHeartbeat, stopHeartbeat } from "./heartbeat.js";
 import { basename } from "node:path";
 import {
   resolveProfiles,
+  isMonorepoManifest,
   type SessionResult,
   type FailureEntry,
   type CheckpointEntry,
@@ -29,7 +30,9 @@ import {
   type PivCommand,
   type BudgetContext,
   type ProgressCallback,
+  type WorkUnit,
 } from "./types.js";
+import { getWorkUnits, isSliceComplete, updateSliceStatus, workUnitToLabel } from "./monorepo-resolver.js";
 import type { TelegramNotifier } from "./telegram-notifier.js";
 
 // --- Command Pairings (from CLAUDE.md Context Window Pairings) ---
@@ -73,6 +76,20 @@ function preflightPairing(): { commands: string[]; type: PivCommand } {
   return {
     commands: ["/preflight"],
     type: "preflight",
+  };
+}
+
+function slicePlanPairing(wu: WorkUnit): { commands: string[]; type: PivCommand } {
+  return {
+    commands: ["/prime", `/plan-feature --module ${wu.module} --slice ${wu.slice}`],
+    type: "plan-feature",
+  };
+}
+
+function sliceExecutePairing(planPath: string): { commands: string[]; type: PivCommand } {
+  return {
+    commands: ["/prime", `/execute ${planPath}`],
+    type: "execute",
   };
 }
 
@@ -485,6 +502,268 @@ export async function runPhase(
   console.log(`\n🎉 Phase ${phase} complete! (total cost: $${totalCost.usd.toFixed(2)})`);
 }
 
+// --- Slice Runner (monorepo mode) ---
+
+/**
+ * Run a single slice through the full PIV loop.
+ * Pipeline: plan → checkpoint → execute → fidelity check → drift detection → validate → commit
+ * Mirrors runPhase but uses WorkUnit instead of flat phase number.
+ */
+export async function runSlice(
+  workUnit: WorkUnit,
+  projectDir: string,
+  notifier?: TelegramNotifier,
+  pauseCheck?: () => Promise<void>
+): Promise<void> {
+  let manifest = await readManifest(projectDir);
+  const label = workUnitToLabel(workUnit);
+  const { module, slice, sliceStatus } = workUnit;
+
+  await notifier?.sendText(`🚀 <b>${label}</b> — starting`);
+  const totalCost = { usd: 0 };
+
+  // --- Plan ---
+  if (sliceStatus.plan !== "complete") {
+    console.log(`\n🗺️  ${label} — Planning`);
+    const { callback: progressCb } = createProgressCallback(notifier, 0, "plan-feature");
+    const pairing = slicePlanPairing(workUnit);
+    const budgetCtx: BudgetContext = { command: "plan-feature", projectDir, manifest };
+    const results = await runCommandPairing(pairing.commands, projectDir, pairing.type, progressCb, budgetCtx);
+    const lastResult = getLastResult(results);
+    totalCost.usd += results.reduce((sum, r) => sum + r.costUsd, 0);
+
+    // F4: Score context quality from /prime output
+    if (results.length > 1) {
+      const primeResult = results[0];
+      const ctxScore = scoreContext(primeResult.output, manifest, undefined, { module, slice });
+      console.log(formatContextScore(ctxScore));
+      if (!isContextSufficient(ctxScore)) {
+        console.log("  Context score below threshold — proceeding anyway");
+      }
+    }
+
+    if (lastResult.error) {
+      await handleError(manifest, projectDir, "plan-feature", 0, lastResult, undefined, notifier);
+      return;
+    }
+
+    manifest = await readManifest(projectDir);
+    manifest = updateSliceStatus(manifest, module, slice, { plan: "complete" });
+    await writeManifest(projectDir, manifest);
+    console.log(`  ✅ ${label} plan complete`);
+  }
+
+  // --- Checkpoint + Execute ---
+  if (sliceStatus.execution !== "complete") {
+    console.log(`\n⚙️  ${label} — Executing`);
+
+    // Create or reuse checkpoint
+    let checkpointTag: string;
+    const activeCheckpoint = findActiveCheckpoint(manifest);
+    if (activeCheckpoint) {
+      checkpointTag = activeCheckpoint.tag;
+      console.log(`  🔖 Reusing checkpoint: ${checkpointTag}`);
+    } else {
+      checkpointTag = createCheckpoint(projectDir, 0);
+      manifest = mergeManifest(manifest, {
+        checkpoints: [{
+          tag: checkpointTag,
+          phase: 0,
+          created_before: "execute",
+          status: "active",
+        }],
+      });
+      await writeManifest(projectDir, manifest);
+      console.log(`  🔖 Checkpoint created: ${checkpointTag}`);
+    }
+
+    const planPath = manifest.plans?.find(
+      (p) => (p as unknown as Record<string, unknown>)["module"] === module && (p as unknown as Record<string, unknown>)["slice"] === slice
+    )?.path;
+    if (!planPath) {
+      console.log(`  ❌ No plan file found for ${label}`);
+      return;
+    }
+
+    const { callback: progressCb } = createProgressCallback(notifier, 0, "execute");
+    const budgetCtx: BudgetContext = { command: "execute", projectDir, manifest };
+    const pairing = sliceExecutePairing(planPath);
+    const results = await runCommandPairing(pairing.commands, projectDir, pairing.type, progressCb, budgetCtx);
+    const lastResult = getLastResult(results);
+    totalCost.usd += results.reduce((sum, r) => sum + r.costUsd, 0);
+
+    // F4: Score context quality from /prime output
+    if (results.length > 1) {
+      const primeResult = results[0];
+      const ctxScore = scoreContext(primeResult.output, manifest, undefined, { module, slice });
+      console.log(formatContextScore(ctxScore));
+    }
+
+    if (lastResult.error) {
+      await handleError(manifest, projectDir, "execute", 0, lastResult, checkpointTag, notifier);
+      return;
+    }
+
+    manifest = await readManifest(projectDir);
+    manifest = updateSliceStatus(manifest, module, slice, { execution: "complete" });
+    await writeManifest(projectDir, manifest);
+    console.log(`  ✅ ${label} execution complete`);
+
+    // --- F6: Fidelity Check ---
+    if (planPath) {
+      console.log(`\n📐 ${label} — Fidelity check`);
+      try {
+        const fidelity = checkFidelity(projectDir, planPath, 0, { module, slice });
+        console.log(formatFidelityReport(fidelity));
+        if (fidelity.fidelityScore < 50) {
+          console.log("  ⚠️ Low fidelity — execution may have diverged from plan");
+        }
+      } catch (err) {
+        console.log(`  ⚠️ Fidelity check failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // --- F5: Drift Detection ---
+    // In monorepo mode, run drift detection for the module
+    console.log(`\n🔬 ${label} — Drift check`);
+    try {
+      const drift = runRegressionTests(projectDir, 0, manifest);
+      if (drift.regressionDetected) {
+        console.log(`  ⚠️ Regression: ${drift.testsFailed} tests failed`);
+        const { callback: fixCb } = createProgressCallback(notifier, 0, "fix-regression");
+        await runCommandPairing(
+          ["/prime", `Fix regression in prior tests: ${drift.failedTests.join(", ")}`],
+          projectDir,
+          "execute",
+          fixCb,
+          { command: "execute", projectDir, manifest }
+        );
+        const recheck = runRegressionTests(projectDir, 0, manifest);
+        if (recheck.regressionDetected) {
+          console.log(`  ⚠️ Regression persists (${recheck.testsFailed} tests) — logging as advisory, continuing`);
+        } else if (recheck.testsRun > 0) {
+          console.log(`  ✅ Regression fixed — all ${recheck.testsRun} tests pass`);
+        }
+      } else if (drift.testsRun > 0) {
+        console.log(`  ✅ All ${drift.testsRun} tests passed`);
+      } else {
+        console.log(`  ℹ️ No test directories found — skipping`);
+      }
+    } catch (err) {
+      console.log(`  ⚠️ Drift detection failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // --- Validate ---
+  if (sliceStatus.validation !== "pass") {
+    console.log(`\n🔍 ${label} — Validating`);
+    let validated = false;
+    let retries = 0;
+    const maxValidationRetries = 2;
+
+    while (!validated && retries <= maxValidationRetries) {
+      const { callback: progressCb } = createProgressCallback(notifier, 0, "validate");
+      const budgetCtx: BudgetContext = { command: "validate-implementation", projectDir, manifest };
+      const pairing = validatePairing();
+      const results = await runCommandPairing(pairing.commands, projectDir, pairing.type, progressCb, budgetCtx);
+      const lastResult = getLastResult(results);
+      totalCost.usd += results.reduce((sum, r) => sum + r.costUsd, 0);
+
+      // F4: Score context quality from /prime output
+      if (results.length > 1) {
+        const primeResult = results[0];
+        const ctxScore = scoreContext(primeResult.output, manifest, undefined, { module, slice });
+        console.log(formatContextScore(ctxScore));
+      }
+
+      if (lastResult.error) {
+        const category = classifyError(
+          lastResult.error.messages.join("; "),
+          "validate-implementation"
+        );
+        const taxonomy = getTaxonomy(category);
+
+        if (retries < maxValidationRetries && !taxonomy.needsHuman) {
+          console.log(`  ⚠️ Validation failed (${category}) — attempting refactor (retry ${retries + 1})`);
+          retries++;
+
+          const { callback: fixCb } = createProgressCallback(notifier, 0, "fix-validation");
+          const refactorResults = await runCommandPairing(
+            ["/prime", `Fix the following validation error and re-run tests: ${lastResult.error.messages.join("; ")}`],
+            projectDir,
+            "execute",
+            fixCb,
+            { command: "execute", projectDir, manifest }
+          );
+          totalCost.usd += refactorResults.reduce((sum, r) => sum + r.costUsd, 0);
+          continue;
+        }
+
+        await handleError(manifest, projectDir, "validate-implementation", 0, lastResult, undefined, notifier);
+        return;
+      }
+
+      const validationStatus = lastResult.hooks["validation_status"];
+      if (validationStatus === "pass" || validationStatus === "success" || !lastResult.error) {
+        validated = true;
+      } else {
+        retries++;
+        if (retries > maxValidationRetries) {
+          console.log(`  ❌ Validation failed after ${maxValidationRetries} retries`);
+          await handleError(manifest, projectDir, "validate-implementation", 0, lastResult, undefined, notifier);
+          return;
+        }
+      }
+    }
+
+    manifest = await readManifest(projectDir);
+    manifest = updateSliceStatus(manifest, module, slice, { validation: "pass" });
+    await writeManifest(projectDir, manifest);
+    console.log(`  ✅ ${label} validation passed`);
+  }
+
+  // --- Commit ---
+  console.log(`\n📦 ${label} — Committing`);
+  const { callback: commitProgressCb } = createProgressCallback(notifier, 0, "commit");
+  const commitBudgetCtx: BudgetContext = { command: "commit", projectDir };
+  let commitResults = await runCommandPairing(commitPairing().commands, projectDir, "commit", commitProgressCb, commitBudgetCtx);
+  totalCost.usd += commitResults.reduce((sum, r) => sum + r.costUsd, 0);
+  let commitResult = getLastResult(commitResults);
+
+  if (commitResult.error) {
+    const errorText = commitResult.error.messages.join("; ");
+    const category = classifyError(errorText, "commit");
+    const severity = getSeverity(category);
+
+    console.log(`  ⚠️ Commit failed (${category}, severity: ${severity}) — retrying with increased budget`);
+    const retryBudgetCtx: BudgetContext = { command: "commit", projectDir };
+    const { callback: retryCb } = createProgressCallback(notifier, 0, "commit-retry");
+    commitResults = await runCommandPairing(commitPairing().commands, projectDir, "commit", retryCb, retryBudgetCtx);
+    totalCost.usd += commitResults.reduce((sum, r) => sum + r.costUsd, 0);
+    commitResult = getLastResult(commitResults);
+
+    if (commitResult.error) {
+      console.log(`  ⚠️ Commit failed after retry — continuing to next slice`);
+      await handleError(manifest, projectDir, "commit", 0, commitResult, undefined, notifier);
+    }
+  }
+
+  if (!commitResult.error) {
+    console.log(`  ✅ ${label} committed`);
+  }
+
+  // Resolve checkpoint
+  manifest = await readManifest(projectDir);
+  const activeCheckpoint = findActiveCheckpoint(manifest);
+  if (activeCheckpoint) {
+    manifest = resolveCheckpoint(manifest, activeCheckpoint.tag);
+  }
+  await writeManifest(projectDir, manifest);
+
+  await notifier?.sendText(`✅ <b>${label} complete!</b> (cost: $${totalCost.usd.toFixed(2)})`);
+  console.log(`\n🎉 ${label} complete! (total cost: $${totalCost.usd.toFixed(2)})`);
+}
+
 /**
  * Run all phases from the manifest sequentially.
  */
@@ -515,6 +794,54 @@ export async function runAllPhases(
     await notifier?.sendText(
       "🛑 <b>Orchestrator stopped</b> — preflight checks failed. Provide missing credentials and restart."
     );
+    return;
+  }
+
+  // --- Monorepo mode: iterate slices instead of phases ---
+  if (isMonorepoManifest(manifest)) {
+    const workUnits = getWorkUnits(manifest);
+    console.log(`\n🚀 Starting autonomous execution — ${workUnits.length} slices across modules\n`);
+
+    // Central registry heartbeat
+    const projectName = basename(projectDir);
+    const registryHeartbeatTimer = startHeartbeat(projectDir, projectName);
+
+    for (const wu of workUnits) {
+      await pauseCheck?.();
+      if (isSliceComplete(wu.sliceStatus)) {
+        console.log(`⏭️  ${workUnitToLabel(wu)} already complete — skipping`);
+        continue;
+      }
+
+      console.log(`\n${"=".repeat(60)}`);
+      console.log(`  ${workUnitToLabel(wu)}`);
+      console.log(`${"=".repeat(60)}`);
+
+      await runSlice(wu, projectDir, notifier, pauseCheck);
+
+      manifest = await readManifest(projectDir);
+      const blockingFailure = findPendingFailure(manifest, "blocking");
+      if (blockingFailure) {
+        console.log(`\n🛑 Stopping — blocking failure: ${blockingFailure.details}`);
+        stopHeartbeat(registryHeartbeatTimer, projectDir, projectName);
+        break;
+      }
+    }
+
+    stopHeartbeat(registryHeartbeatTimer, projectDir, projectName);
+
+    // Final summary
+    manifest = await readManifest(projectDir);
+    const nextAction = determineNextAction(manifest);
+    manifest = setNextAction(manifest, nextAction);
+    await writeManifest(projectDir, manifest);
+
+    console.log(`\n${"=".repeat(60)}`);
+    console.log(`  Execution Summary`);
+    console.log(`${"=".repeat(60)}`);
+    console.log(`Next action: ${nextAction.command} ${nextAction.argument ?? ""}`);
+
+    await notifier?.sendText("✅ <b>All slices complete!</b>");
     return;
   }
 

@@ -2,6 +2,7 @@
 
 import {
   resolveProfiles,
+  isMonorepoManifest,
   type Manifest,
   type NextAction,
   type FailureEntry,
@@ -10,6 +11,7 @@ import {
   type PhaseStatus,
 } from "./types.js";
 import { getSeverity } from "./error-classifier.js";
+import { getNextUnfinishedWorkUnit } from "./monorepo-resolver.js";
 
 const SEVERITY_ORDER: Record<FailureSeverity, number> = {
   blocking: 3,
@@ -189,6 +191,57 @@ export function determineNextAction(manifest: Manifest): NextAction {
     return {
       command: "create-prd",
       reason: "No PRD found — create requirements document first",
+      confidence: "high",
+    };
+  }
+
+  // 5b: Monorepo slice progression (before flat phase logic)
+  if (isMonorepoManifest(manifest)) {
+    const workUnit = getNextUnfinishedWorkUnit(manifest);
+    if (!workUnit) {
+      return {
+        command: "done",
+        reason: "All slices complete",
+        confidence: "high",
+      };
+    }
+
+    const { module, slice, sliceStatus } = workUnit;
+    const label = `Module ${module} / Slice ${slice}`;
+
+    if (sliceStatus.plan !== "complete") {
+      return {
+        command: "plan-feature",
+        argument: `--module ${module} --slice ${slice}`,
+        reason: `${label} needs a plan`,
+        confidence: "high",
+      };
+    }
+
+    if (sliceStatus.execution !== "complete") {
+      const planPath = manifest.plans?.find(
+        (p) => (p as any).module === module && (p as any).slice === slice
+      )?.path;
+      return {
+        command: "execute",
+        argument: planPath ?? `context/modules/${module}/slices/${slice}/plan.md`,
+        reason: `${label} plan complete — ready for execution`,
+        confidence: "high",
+      };
+    }
+
+    if (sliceStatus.validation !== "pass") {
+      return {
+        command: "validate-implementation",
+        argument: "--full",
+        reason: `${label} executed — needs validation`,
+        confidence: "high",
+      };
+    }
+
+    return {
+      command: "commit",
+      reason: `${label} validated — ready to commit`,
       confidence: "high",
     };
   }

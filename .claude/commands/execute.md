@@ -37,6 +37,10 @@ Hooks are always enabled. `## PIV-Automator-Hooks` is appended to the progress f
      ```bash
      git tag piv-checkpoint/{phase}-{timestamp}
      ```
+   For monorepo mode (plan metadata contains module/slice):
+   ```bash
+   git tag piv-checkpoint/{module}-{slice}-{ISO-8601-timestamp}
+   ```
   4. Record in manifest `checkpoints` section:
      ```yaml
      checkpoints:
@@ -64,6 +68,12 @@ Hooks are always enabled. `## PIV-Automator-Hooks` is appended to the progress f
 - Create or update `.agents/progress/{plan-name}-progress.md` with task list
 - Set all tasks to status: "todo"
 - Record: task ID, title, dependencies, assigned technology profiles, timestamps
+
+For monorepo mode (plan metadata contains module/slice):
+- Progress file: `.agents/progress/{module}-{slice}-progress.md`
+- Write source code to `src/{module-name}/{slice-id}/`
+- Follow slice context.md schema design for data models
+- Follow slice context.md API design for endpoints
 
 ## Step 4: Task Dependency Analysis
 

@@ -5,6 +5,7 @@ import {
   findActiveCheckpoint,
   getNextUnfinishedPhase,
 } from "../src/state-machine.js";
+import { isMonorepoManifest } from "../src/types.js";
 import type { Manifest } from "../src/types.js";
 
 function baseManifest(): Manifest {
@@ -454,5 +455,157 @@ describe("determineNextAction", () => {
     expect(action.command).toBe("research-stack");
     expect(action.reason).toContain("playwright");
     expect(action.reason).toContain("redis");
+  });
+});
+
+function monorepoManifest(): Manifest {
+  return {
+    project: { name: "test", scaffolded_at: "2026-03-01", structure: "context-monorepo" },
+    modules: {
+      "0-foundation": {
+        specification: "context/modules/0-foundation/specification.md",
+        status: "complete",
+        slices: {
+          "01-data-model": { plan: "complete", execution: "complete", validation: "pass" },
+          "02-api": { plan: "complete", execution: "not_started", validation: "not_run" },
+        },
+      },
+      "1-processing": {
+        specification: "context/modules/1-processing/specification.md",
+        status: "complete",
+        slices: {
+          "01-pipeline": { plan: "not_started", execution: "not_started", validation: "not_run" },
+        },
+      },
+    },
+    prd: { path: ".agents/PRD.md", status: "validated", generated_at: "2026-02-18", phases_defined: [] },
+    phases: {},
+    settings: {
+      profile_freshness_window: "7d",
+      checkpoint_before_execute: true,
+      mode: "autonomous",
+      reasoning_model: "opus-4-6",
+      validation_mode: "full",
+      agent_teams: "prefer_parallel",
+    },
+    profiles: {
+      "claude-agent-sdk": {
+        path: ".agents/reference/claude-agent-sdk-profile.md",
+        generated_at: "2026-03-01",
+        status: "complete",
+        freshness: "fresh",
+        used_in_phases: [],
+      },
+    },
+    preflight: { status: "passed", completed_at: "2026-03-01", credentials_verified: 1, technologies_checked: ["sdk"] },
+    last_updated: "2026-03-01",
+  };
+}
+
+describe("Monorepo mode", () => {
+  it("routes to plan-feature for unplanned slice", () => {
+    const m = monorepoManifest();
+    // 0-foundation/02-api has plan complete but execution not_started
+    // 1-processing/01-pipeline has plan not_started — this is first unfinished
+    // But 0-foundation/02-api comes first alphabetically with incomplete execution
+    const action = determineNextAction(m);
+    expect(action.command).toBe("execute");
+    // Should target 0-foundation/02-api (first unfinished)
+  });
+
+  it("routes to execute for planned but unexecuted slice", () => {
+    const m: Manifest = {
+      ...monorepoManifest(),
+      modules: {
+        "0-foundation": {
+          specification: "context/modules/0-foundation/specification.md",
+          status: "complete",
+          slices: {
+            "01": { plan: "complete", execution: "not_started", validation: "not_run" },
+          },
+        },
+      },
+    };
+    const action = determineNextAction(m);
+    expect(action.command).toBe("execute");
+  });
+
+  it("routes to validate for executed but unvalidated slice", () => {
+    const m: Manifest = {
+      ...monorepoManifest(),
+      modules: {
+        "0-foundation": {
+          specification: "context/modules/0-foundation/specification.md",
+          status: "complete",
+          slices: {
+            "01": { plan: "complete", execution: "complete", validation: "not_run" },
+          },
+        },
+      },
+    };
+    const action = determineNextAction(m);
+    expect(action.command).toBe("validate-implementation");
+  });
+
+  it("routes to commit for validated slice", () => {
+    const m: Manifest = {
+      ...monorepoManifest(),
+      modules: {
+        "0-foundation": {
+          specification: "context/modules/0-foundation/specification.md",
+          status: "complete",
+          slices: {
+            "01": { plan: "complete", execution: "complete", validation: "pass" },
+          },
+        },
+      },
+    };
+    const action = determineNextAction(m);
+    expect(action.command).toBe("done");
+  });
+
+  it("returns done when all slices complete", () => {
+    const m: Manifest = {
+      ...monorepoManifest(),
+      modules: {
+        "0-foundation": {
+          specification: "context/modules/0-foundation/specification.md",
+          status: "complete",
+          slices: {
+            "01": { plan: "complete", execution: "complete", validation: "pass" },
+            "02": { plan: "complete", execution: "complete", validation: "pass" },
+          },
+        },
+      },
+    };
+    const action = determineNextAction(m);
+    expect(action.command).toBe("done");
+    expect(action.reason).toContain("All slices complete");
+  });
+
+  it("still handles failures in monorepo mode (priority)", () => {
+    const m: Manifest = {
+      ...monorepoManifest(),
+      failures: [{
+        command: "execute",
+        phase: 0,
+        error_category: "syntax_error",
+        timestamp: "2026-03-01",
+        retry_count: 0,
+        max_retries: 2,
+        resolution: "pending",
+        details: "Compilation failed",
+      }],
+    };
+    const action = determineNextAction(m);
+    expect(action.command).toBe("execute");
+    expect(action.argument).toBe("retry");
+  });
+
+  it("classic manifest behavior unchanged (regression guard)", () => {
+    const m = baseManifest();
+    const action = determineNextAction(m);
+    expect(action.command).toBe("execute");
+    expect(action.argument).toBe(".agents/plans/phase-1.md");
   });
 });

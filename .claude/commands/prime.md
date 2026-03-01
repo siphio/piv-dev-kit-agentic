@@ -100,6 +100,23 @@ Store all of this for use in the output report and next-action determination.
 
 If `evolution` section is absent, skip this step — standard single-PRD behavior.
 
+### 0b-mono. Monorepo Context Loading
+
+> Run this step after Step 0b if manifest has `project.structure: context-monorepo`.
+
+**Check for `project` section in manifest.** If `project.structure === "context-monorepo"`:
+
+1. **Read `context/architecture.md`** — extract module map and dependency DAG
+2. **For each module in manifest `modules` section:**
+   - Read `context/modules/{name}/specification.md` — first 20 lines (summary)
+   - Count slices, note statuses (stub/complete)
+3. **Identify next unfinished slice** (first with plan !== complete or execution !== complete)
+4. **For the next slice**, read `context/modules/{module}/slices/{slice}/context.md` — extract:
+   - Technology decisions, validation gates, infrastructure requirements
+5. Store context for output report
+
+If `project.structure` is absent or not `context-monorepo`, skip this step — standard behavior.
+
 ### 0c. Coverage Gap Detection
 
 1. **Determine active PRD:**
@@ -257,6 +274,16 @@ Include this section only when the manifest has an `evolution` block:
 - **Research pending:** [list of techs needing profiling, or "none — all profiles current"]
 - **Current focus:** Phase [gen2_start] — [phase name from PRD2]
 
+### Monorepo Status (If `project.structure: context-monorepo`)
+
+Include this section only when the manifest has a `project` block with `structure: context-monorepo`:
+
+- **Structure:** context-monorepo
+- **Modules:** [N] total, [N] complete, [N] in progress
+- **Slices:** [N] total, [N] planned, [N] executed, [N] validated
+- **Next work unit:** Module [name] / Slice [id] — [status]
+- **Architecture:** [loaded / missing]
+
 ### Core Principles
 - Code style and conventions observed
 - Documentation standards
@@ -293,6 +320,7 @@ Report:
 4. Stale or missing profiles needed for next phase? → "Run `/research-stack --refresh` to update stale profiles" or "Run `/research-stack` to generate missing profiles" (also covers `stale_artifact` error category)
 5. No PRD? → "Run `/create-prd` to define requirements"
 5b. **Evolution: gen 1 complete, no PRD2 registered?** → "Run `/evolve [prd2_path]` to register your gen 2 PRD and continue development" (triggers when: all gen 1 phases validated AND no `evolution` section in manifest)
+5c. **Monorepo mode: next unfinished slice?** → "Run `/plan-feature --module X --slice Y`" or "Run `/execute [plan]`" based on slice status (triggers when: `project.structure: context-monorepo` AND `modules` has incomplete slices)
 6. Next phase has no plan? → "Run `/plan-feature \"Phase N: Name\"` to start planning"
 7. Plan exists, not executed? → "Run `/execute .agents/plans/[plan].md`"
 8. Executed, not validated? → "Run `/validate-implementation`"

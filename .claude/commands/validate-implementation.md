@@ -132,6 +132,22 @@ ls -t .agents/plans/*.md 2>/dev/null | head -1
 - If `.agents/reference/` does not exist: log warning in validation matrix, proceed with plan commands and PRD scenarios only
 - **CRITICAL**: Technology profile Section 9 tests are the PRIMARY source for live integration testing. Plan VALIDATION COMMANDS are secondary. When both exist, execute BOTH.
 
+**From Slice Context (monorepo mode, if plan metadata contains module/slice):**
+- Read `context/modules/{module}/slices/{slice}/context.md`
+- Extract Validation Gates section — these are PRIMARY pass criteria:
+  - Each gate has: metric, target value, measurement method
+  - Example: "Species matching accuracy >= 90%"
+- Extract Infrastructure Requirements — verify provisioned
+- Extract Error Handling table — verify implemented
+- Build validation matrix from: plan VALIDATION COMMANDS + context.md validation gates
+
+**Map validation gates to test execution:**
+For each validation gate in context.md:
+- Determine measurement method (test command, API call, metric query)
+- Execute measurement
+- Compare result against target
+- Report: PASS (met or exceeded) / FAIL (below target)
+
 ### Step 3: Build Validation Matrix
 
 Combine all sources into a validation matrix:
@@ -773,6 +789,10 @@ suggested_arg: "[appropriate argument]"
 retry_remaining: [N]
 requires_clear: [true|false]
 confidence: [high|medium|low]
+module: {module-name}
+slice: {slice-id}
+validation_gates_total: N
+validation_gates_passed: N
 ```
 
 **Orchestrator enforcement contract:** The orchestrator parses `live_tests_executed` from hooks. If the key is **absent**, the orchestrator falls back to parsing the validation report file directly to count live tests. If the extracted count is 0 AND technology profiles exist, the orchestrator rejects the validation and re-invokes `/validate-implementation` regardless of `validation_status`. Writing `live_tests_executed: 0` when no tests ran is honest; omitting the key entirely is the silent failure mode — both will trigger a re-run when profiles are present.
