@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { createResolver, DependencyResolver } from "../src/dependency-resolver.js";
 import { buildDAG } from "../src/mission-planner.js";
-import type { DependencyEdge, WorkUnit } from "../src/types.js";
+import type { DAGNode, DependencyEdge, WorkUnit } from "../src/types.js";
 
 function makeWorkUnit(module: string, slice: string): WorkUnit {
   return {
@@ -118,5 +118,107 @@ describe("DependencyResolver", () => {
     const resolver = setupParallel();
     const unblocked = resolver.getUnblockedNodes();
     expect(unblocked).toHaveLength(3);
+  });
+});
+
+describe("mergeNewWork", () => {
+  it("adds a new independent node", () => {
+    const resolver = setup3NodeChain();
+    const newNode = { module: "m", slice: "d", dependencies: [], dependents: [], status: "ready" as const };
+    const added = resolver.mergeNewWork([newNode], []);
+
+    expect(added).toEqual(["m/d"]);
+    expect(resolver.getPlan().totalSlices).toBe(4);
+    const nodeD = resolver.getPlan().nodes.find((n) => n.slice === "d");
+    expect(nodeD?.status).toBe("ready");
+  });
+
+  it("skips duplicate nodes", () => {
+    const resolver = setup3NodeChain();
+    const dupNode = { module: "m", slice: "a", dependencies: [], dependents: [], status: "ready" as const };
+    const added = resolver.mergeNewWork([dupNode], []);
+
+    expect(added).toEqual([]);
+    expect(resolver.getPlan().totalSlices).toBe(3);
+  });
+
+  it("new node depending on completed node starts ready", () => {
+    const resolver = setup3NodeChain();
+    resolver.markSliceComplete("m", "a");
+
+    const newNode = { module: "m", slice: "d", dependencies: [], dependents: [], status: "ready" as const };
+    const newEdge: DependencyEdge = { from: { module: "m", slice: "a" }, to: { module: "m", slice: "d" }, type: "data" };
+    const added = resolver.mergeNewWork([newNode], [newEdge]);
+
+    expect(added).toEqual(["m/d"]);
+    const nodeD = resolver.getPlan().nodes.find((n) => n.slice === "d");
+    expect(nodeD?.status).toBe("ready");
+  });
+
+  it("new node depending on running node starts blocked", () => {
+    const resolver = setup3NodeChain();
+    resolver.markRunning("m", "a", "session-1");
+
+    const newNode = { module: "m", slice: "d", dependencies: [], dependents: [], status: "ready" as const };
+    const newEdge: DependencyEdge = { from: { module: "m", slice: "a" }, to: { module: "m", slice: "d" }, type: "data" };
+    const added = resolver.mergeNewWork([newNode], [newEdge]);
+
+    expect(added).toEqual(["m/d"]);
+    const nodeD = resolver.getPlan().nodes.find((n) => n.slice === "d");
+    expect(nodeD?.status).toBe("blocked");
+  });
+
+  it("throws on cycle from new edges", () => {
+    const resolver = setup3NodeChain();
+    const newNode = { module: "m", slice: "d", dependencies: [], dependents: [], status: "ready" as const };
+    // d depends on c, and a depends on d → creates cycle a→b→c→d→...→a
+    const cyclicEdges: DependencyEdge[] = [
+      { from: { module: "m", slice: "c" }, to: { module: "m", slice: "d" }, type: "data" },
+      { from: { module: "m", slice: "d" }, to: { module: "m", slice: "a" }, type: "data" },
+    ];
+
+    expect(() => resolver.mergeNewWork([newNode], cyclicEdges)).toThrow("Circular dependency");
+    // Node should have been rolled back
+    expect(resolver.getPlan().totalSlices).toBe(3);
+  });
+
+  it("does not duplicate existing edges", () => {
+    const resolver = setup3NodeChain();
+    const nodeA = resolver.getPlan().nodes.find((n) => n.slice === "a")!;
+    const existingDependentCount = nodeA.dependents.length;
+
+    // Try to re-add the same a→b edge
+    const dupEdge: DependencyEdge = { from: { module: "m", slice: "a" }, to: { module: "m", slice: "b" }, type: "data" };
+    const newNode = { module: "m", slice: "d", dependencies: [], dependents: [], status: "ready" as const };
+    resolver.mergeNewWork([newNode], [dupEdge]);
+
+    const updatedA = resolver.getPlan().nodes.find((n) => n.slice === "a")!;
+    expect(updatedA.dependents.length).toBe(existingDependentCount);
+  });
+
+  it("updates plan metadata (totalSlices, maxParallelism)", () => {
+    const resolver = setupParallel(); // 3 independent nodes
+    const origSlices = resolver.getPlan().totalSlices;
+
+    const newNode = { module: "x", slice: "1", dependencies: [], dependents: [], status: "ready" as const };
+    resolver.mergeNewWork([newNode], []);
+
+    expect(resolver.getPlan().totalSlices).toBe(origSlices + 1);
+    expect(resolver.getPlan().maxParallelism).toBeGreaterThanOrEqual(origSlices + 1);
+  });
+
+  it("preserves status of existing running/complete nodes", () => {
+    const resolver = setup3NodeChain();
+    resolver.markRunning("m", "a", "session-1");
+
+    const newNode = { module: "m", slice: "d", dependencies: [], dependents: [], status: "ready" as const };
+    resolver.mergeNewWork([newNode], []);
+
+    const nodeA = resolver.getPlan().nodes.find((n) => n.slice === "a")!;
+    expect(nodeA.status).toBe("running");
+    expect(nodeA.assignedAgent).toBe("session-1");
+
+    const nodeB = resolver.getPlan().nodes.find((n) => n.slice === "b")!;
+    expect(nodeB.status).toBe("blocked");
   });
 });

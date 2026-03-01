@@ -201,7 +201,7 @@ export function markNodeFailed(plan: MissionPlan, module: string, slice: string)
 
 // --- Internal helpers ---
 
-function hasCycle(nodeMap: Map<string, DAGNode>): boolean {
+export function hasCycle(nodeMap: Map<string, DAGNode>): boolean {
   const visited = new Set<string>();
   const recStack = new Set<string>();
 
@@ -234,7 +234,7 @@ function hasCycle(nodeMap: Map<string, DAGNode>): boolean {
   return false;
 }
 
-function computeParallelStreams(nodes: DAGNode[]): DAGNode[][] {
+export function computeParallelStreams(nodes: DAGNode[]): DAGNode[][] {
   // Group nodes by their topological depth (BFS from roots)
   const levels: DAGNode[][] = [];
   const assigned = new Set<string>();

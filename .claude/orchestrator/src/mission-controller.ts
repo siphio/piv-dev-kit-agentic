@@ -23,6 +23,7 @@ import type {
   AgentYamlConfig,
   AgentSession,
   DAGNode,
+  DependencyEdge,
   LifecycleEvent,
   MissionPlan,
   WorkUnit,
@@ -30,6 +31,7 @@ import type {
 
 const MAX_AGENT_RETRIES = 2;
 const HEARTBEAT_INTERVAL_MS = 2 * 60_000;
+const RESCAN_INTERVAL_MS = 60_000;
 
 interface ActiveWork {
   node: DAGNode;
@@ -37,6 +39,72 @@ interface ActiveWork {
   workUnit: WorkUnit;
   promise: Promise<AgentSession>;
   sessionId: string;
+}
+
+/**
+ * Re-read the manifest to detect newly added modules/slices and merge
+ * them into the live DAG. Returns the number of nodes added.
+ */
+async function rescanForNewWork(
+  projectDir: string,
+  resolver: DependencyResolver,
+  knownUnitKeys: Set<string>,
+  workUnitMap: Map<string, WorkUnit>,
+  architecturePath: string
+): Promise<number> {
+  const freshManifest = await readManifest(projectDir);
+  const freshUnits = getWorkUnits(freshManifest);
+
+  // Find new incomplete units not already tracked
+  const newUnits = freshUnits.filter((wu) => {
+    const key = `${wu.module}/${wu.slice}`;
+    if (knownUnitKeys.has(key)) return false;
+    return (
+      wu.sliceStatus.plan !== "complete" ||
+      wu.sliceStatus.execution !== "complete" ||
+      wu.sliceStatus.validation !== "pass"
+    );
+  });
+
+  if (newUnits.length === 0) return 0;
+
+  // Re-read architecture.md for updated edges
+  let freshEdges: DependencyEdge[] = [];
+  if (existsSync(architecturePath)) {
+    const content = readFileSync(architecturePath, "utf-8");
+    freshEdges = parseDependencyGraph(content);
+  }
+
+  // Build DAGNode stubs for new units
+  const newNodes: DAGNode[] = newUnits.map((wu) => ({
+    module: wu.module,
+    slice: wu.slice,
+    dependencies: [],
+    dependents: [],
+    status: "ready" as const,
+    assignedAgent: undefined,
+  }));
+
+  // Filter edges to only those involving at least one new node
+  const newKeys = new Set(newUnits.map((wu) => `${wu.module}/${wu.slice}`));
+  const relevantEdges = freshEdges.filter((e) => {
+    const fromKey = `${e.from.module}/${e.from.slice}`;
+    const toKey = `${e.to.module}/${e.to.slice}`;
+    return newKeys.has(fromKey) || newKeys.has(toKey);
+  });
+
+  const addedKeys = resolver.mergeNewWork(newNodes, relevantEdges);
+
+  // Track the new units
+  for (const wu of newUnits) {
+    const key = `${wu.module}/${wu.slice}`;
+    if (addedKeys.includes(key)) {
+      knownUnitKeys.add(key);
+      workUnitMap.set(key, wu);
+    }
+  }
+
+  return addedKeys.length;
 }
 
 /**
@@ -76,21 +144,27 @@ export async function runMission(
 
   // --- Step 3: Build DAG from work units ---
   const workUnits = getWorkUnits(manifest);
-  const incompleteUnits = workUnits.filter(
-    (wu) =>
+  const workUnitMap = new Map<string, WorkUnit>();
+  for (const wu of workUnits) {
+    if (
       wu.sliceStatus.plan !== "complete" ||
       wu.sliceStatus.execution !== "complete" ||
       wu.sliceStatus.validation !== "pass"
-  );
+    ) {
+      workUnitMap.set(`${wu.module}/${wu.slice}`, wu);
+    }
+  }
 
-  if (incompleteUnits.length === 0) {
+  if (workUnitMap.size === 0) {
     console.log("  ✅ All slices complete — nothing to do");
     return;
   }
 
+  const knownUnitKeys = new Set(workUnitMap.keys());
+
   let plan: MissionPlan;
   try {
-    plan = buildDAG(edges, incompleteUnits);
+    plan = buildDAG(edges, Array.from(workUnitMap.values()));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.log(`  ❌ DAG construction failed: ${msg}`);
@@ -115,7 +189,7 @@ export async function runMission(
     : undefined;
 
   // Profile paths from manifest
-  const profilePaths = Object.values(manifest.profiles ?? {}).map((p) => p.path);
+  let profilePaths = Object.values(manifest.profiles ?? {}).map((p) => p.path);
 
   // Heartbeat setup
   const projectName = basename(projectDir);
@@ -129,11 +203,37 @@ export async function runMission(
 
   // --- Step 5: Main loop ---
   const activeWork = new Map<string, ActiveWork>();
+  let lastRescanAt = Date.now();
 
   try {
     while (!resolver.isComplete()) {
       // Respect pause/resume signals
       if (pauseCheck) await pauseCheck();
+
+      // --- Periodic rescan for new work ---
+      if (Date.now() - lastRescanAt >= RESCAN_INTERVAL_MS) {
+        try {
+          const added = await rescanForNewWork(
+            projectDir,
+            resolver,
+            knownUnitKeys,
+            workUnitMap,
+            architecturePath
+          );
+          if (added > 0) {
+            // Refresh profile paths in case manifest changed
+            const freshManifest = await readManifest(projectDir);
+            profilePaths = Object.values(freshManifest.profiles ?? {}).map((p) => p.path);
+
+            console.log(`  🔍 Rescan: discovered ${added} new work unit(s)`);
+            await notifier?.sendText(`🔍 Mid-build rescan: added ${added} new work unit(s)`);
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.log(`  ⚠️ Rescan error (non-fatal): ${msg}`);
+        }
+        lastRescanAt = Date.now();
+      }
 
       // Check budget
       if (resourceManager.isBudgetExceeded()) {
@@ -159,9 +259,7 @@ export async function runMission(
           ?? agents[0];
 
         // Find matching work unit
-        const workUnit = incompleteUnits.find(
-          (wu) => wu.module === node.module && wu.slice === node.slice
-        );
+        const workUnit = workUnitMap.get(`${node.module}/${node.slice}`);
         if (!workUnit) continue;
 
         // Assemble context and spawn

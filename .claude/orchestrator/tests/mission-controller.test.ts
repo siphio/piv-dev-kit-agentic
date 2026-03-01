@@ -189,3 +189,73 @@ describe("Mission Controller — Integration Wiring", () => {
     expect(dequeued?.slice).toBe("s2");
   });
 });
+
+describe("Mission Controller — Mid-Build Rescan (SC-011)", () => {
+  it("detects new work units via mergeNewWork", () => {
+    // Start with 2 units
+    const units = [makeWorkUnit("m", "s1"), makeWorkUnit("m", "s2")];
+    const edges: DependencyEdge[] = [
+      { from: { module: "m", slice: "s1" }, to: { module: "m", slice: "s2" }, type: "data" },
+    ];
+
+    const plan = buildDAG(edges, units);
+    const resolver = createResolver(plan);
+
+    // Simulate mid-build discovery of a new unit
+    const newNode = {
+      module: "m",
+      slice: "s3",
+      dependencies: [],
+      dependents: [],
+      status: "ready" as const,
+      assignedAgent: undefined,
+    };
+    const added = resolver.mergeNewWork([newNode], []);
+
+    expect(added).toEqual(["m/s3"]);
+    expect(resolver.getPlan().totalSlices).toBe(3);
+
+    // New node should be ready (no deps)
+    const readyNodes = resolver.getUnblockedNodes();
+    expect(readyNodes.some((n) => n.slice === "s3")).toBe(true);
+
+    // Existing plan state unchanged
+    expect(readyNodes.some((n) => n.slice === "s1")).toBe(true);
+    const nodeS2 = resolver.getPlan().nodes.find((n) => n.slice === "s2");
+    expect(nodeS2?.status).toBe("blocked");
+  });
+
+  it("new node with dep on running work blocks correctly then unblocks on completion", () => {
+    const units = [makeWorkUnit("m", "s1")];
+    const plan = buildDAG([], units);
+    const resolver = createResolver(plan);
+
+    // s1 is running
+    resolver.markRunning("m", "s1", "agent-1");
+
+    // New unit s2 depends on s1
+    const newNode = {
+      module: "m",
+      slice: "s2",
+      dependencies: [],
+      dependents: [],
+      status: "ready" as const,
+      assignedAgent: undefined,
+    };
+    const newEdge: DependencyEdge = {
+      from: { module: "m", slice: "s1" },
+      to: { module: "m", slice: "s2" },
+      type: "data",
+    };
+    resolver.mergeNewWork([newNode], [newEdge]);
+
+    // s2 should be blocked (s1 is running, not complete)
+    const nodeS2 = resolver.getPlan().nodes.find((n) => n.slice === "s2");
+    expect(nodeS2?.status).toBe("blocked");
+
+    // Complete s1 → s2 should unblock
+    resolver.markSliceComplete("m", "s1");
+    const unblockedS2 = resolver.getPlan().nodes.find((n) => n.slice === "s2");
+    expect(unblockedS2?.status).toBe("ready");
+  });
+});
