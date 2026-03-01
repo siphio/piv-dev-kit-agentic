@@ -80,6 +80,11 @@ export interface ImprovementLogEntry {
   propagatedTo?: string[];
   memoryRecordId?: string;
   memoryRetrievedIds?: string[];
+  coalitionHealth?: CoalitionHealthStatus;
+  convergenceTrend?: string;
+  strategicActions?: string[];
+  conflictResolution?: string;
+  coalitionPatternId?: string;
 }
 
 export interface SupervisorTelegramConfig {
@@ -179,4 +184,83 @@ export interface MemorySearchResult {
   text: string;
   similarity: number;
   metadata: Record<string, string>;
+}
+
+// --- Phase 12: Coalition Intelligence ---
+
+export type CoalitionHealthStatus = "healthy" | "degraded" | "critical" | "spinning";
+
+export interface CoalitionSnapshot {
+  timestamp: string;
+  activeAgents: number;
+  totalSlices: number;
+  completedSlices: number;
+  failedSlices: number;
+  blockedSlices: number;
+  runningSlices: number;
+  totalCostUsd: number;
+  budgetLimitUsd: number;
+  conflictsDetected: number;
+  healthStatus: CoalitionHealthStatus;
+}
+
+export interface CoalitionHealthMetrics {
+  convergenceRate: number;
+  failureRate: number;
+  costPerSlice: number;
+  conflictFrequency: number;
+}
+
+export interface ConvergenceWindow {
+  snapshots: CoalitionSnapshot[];
+  windowSize: number;
+  isSpinning: boolean;
+  trend: "improving" | "stable" | "degrading" | "spinning";
+  improvementPercent: number;
+}
+
+export type StrategicActionType =
+  | "pause_agent"
+  | "pause_coalition"
+  | "reallocate"
+  | "deprioritize"
+  | "escalate"
+  | "resolve_conflict";
+
+export interface StrategicAction {
+  type: StrategicActionType;
+  target: string;
+  reason: string;
+  coalitionHealth: CoalitionHealthStatus;
+  timestamp: string;
+}
+
+export interface ConflictDetection {
+  hasConflict: boolean;
+  conflictingFiles: string[];
+  agentA: string;
+  agentB: string;
+  upstreamAgent: string | null;
+  isArchitectural: boolean;
+  resolution: "upstream_wins" | "additive_no_conflict" | "escalate";
+}
+
+export interface CoalitionCycleResult {
+  coalitionActive: boolean;
+  snapshot: CoalitionSnapshot | null;
+  convergence: ConvergenceWindow | null;
+  actionsEmitted: StrategicAction[];
+  conflictsResolved: number;
+  patternsStored: number;
+}
+
+export interface CoalitionMonitorConfig {
+  projectPath: string;
+  manifestPath: string;
+  convergenceWindowSize: number;
+  spinningThreshold: number;
+  failureRateCritical: number;
+  failureRateDegraded: number;
+  conflictCheckEnabled: boolean;
+  crossProjectLearning: boolean;
 }

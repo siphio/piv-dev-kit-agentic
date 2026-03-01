@@ -1,7 +1,7 @@
 // PIV Supervisor — Direct HTTP Telegram Client
 // Uses fetch + @grammyjs/types for type safety. No framework dependency.
 
-import type { SupervisorTelegramConfig, StallType, DiagnosticResult, HotFixResult } from "./types.js";
+import type { SupervisorTelegramConfig, StallType, DiagnosticResult, HotFixResult, CoalitionSnapshot, StrategicAction, ConflictDetection, ConvergenceWindow } from "./types.js";
 
 const TELEGRAM_BASE = "https://api.telegram.org";
 const MAX_MESSAGE_LENGTH = 4096;
@@ -180,6 +180,88 @@ export async function telegramSendFixFailure(
     `<b>Fix Cost:</b> $${fixResult.sessionCostUsd.toFixed(2)}`,
     ``,
     `<b>Action needed:</b> Manual fix required. ${fixResult.revertedOnFailure ? "Fix was reverted." : ""}`,
+  ].join("\n");
+
+  return telegramSendMessage(config, message, "HTML");
+}
+
+/**
+ * Send a coalition health alert with metrics and strategic actions.
+ */
+export async function telegramSendCoalitionAlert(
+  config: SupervisorTelegramConfig,
+  snapshot: CoalitionSnapshot,
+  actions: StrategicAction[],
+): Promise<TelegramApiResponse<TelegramMessage>> {
+  const healthEmoji =
+    snapshot.healthStatus === "healthy" ? "🟢" :
+    snapshot.healthStatus === "degraded" ? "🟡" :
+    snapshot.healthStatus === "critical" ? "🔴" : "🔄";
+
+  const actionLines = actions.length > 0
+    ? actions.map((a) => `  • ${escapeHtml(a.type)}: ${escapeHtml(a.reason)}`).join("\n")
+    : "  None";
+
+  const message = [
+    `<b>${healthEmoji} Coalition Health: ${escapeHtml(snapshot.healthStatus.toUpperCase())}</b>`,
+    ``,
+    `<b>Agents:</b> ${snapshot.activeAgents} active`,
+    `<b>Slices:</b> ${snapshot.completedSlices}/${snapshot.totalSlices} complete, ${snapshot.failedSlices} failed, ${snapshot.runningSlices} running`,
+    `<b>Cost:</b> $${snapshot.totalCostUsd.toFixed(2)} / $${snapshot.budgetLimitUsd.toFixed(2)}`,
+    `<b>Conflicts:</b> ${snapshot.conflictsDetected}`,
+    ``,
+    `<b>Strategic Actions:</b>`,
+    actionLines,
+  ].join("\n");
+
+  return telegramSendMessage(config, message, "HTML");
+}
+
+/**
+ * Send a conflict detection alert.
+ */
+export async function telegramSendConflictAlert(
+  config: SupervisorTelegramConfig,
+  conflict: ConflictDetection,
+): Promise<TelegramApiResponse<TelegramMessage>> {
+  const files = conflict.conflictingFiles.map((f) => `  • ${escapeHtml(f)}`).join("\n");
+  const upstream = conflict.upstreamAgent ?? "undetermined";
+
+  const message = [
+    `<b>⚠️ Cross-Agent File Conflict</b>`,
+    ``,
+    `<b>Agent A:</b> ${escapeHtml(conflict.agentA)}`,
+    `<b>Agent B:</b> ${escapeHtml(conflict.agentB)}`,
+    `<b>Upstream:</b> ${escapeHtml(upstream)}`,
+    `<b>Architectural:</b> ${conflict.isArchitectural ? "Yes" : "No"}`,
+    `<b>Resolution:</b> ${escapeHtml(conflict.resolution)}`,
+    ``,
+    `<b>Conflicting Files:</b>`,
+    files,
+  ].join("\n");
+
+  return telegramSendMessage(config, message, "HTML");
+}
+
+/**
+ * Send a convergence trend warning.
+ */
+export async function telegramSendConvergenceWarning(
+  config: SupervisorTelegramConfig,
+  convergence: ConvergenceWindow,
+): Promise<TelegramApiResponse<TelegramMessage>> {
+  const trendEmoji =
+    convergence.trend === "improving" ? "📈" :
+    convergence.trend === "degrading" ? "📉" :
+    convergence.trend === "spinning" ? "🔄" : "➡️";
+
+  const message = [
+    `<b>${trendEmoji} Convergence Warning</b>`,
+    ``,
+    `<b>Trend:</b> ${escapeHtml(convergence.trend)}`,
+    `<b>Snapshots:</b> ${convergence.snapshots.length}/${convergence.windowSize}`,
+    `<b>Improvement:</b> ${convergence.improvementPercent.toFixed(1)}%`,
+    `<b>Spinning:</b> ${convergence.isSpinning ? "Yes ⚠️" : "No"}`,
   ].join("\n");
 
   return telegramSendMessage(config, message, "HTML");

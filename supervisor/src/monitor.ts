@@ -15,8 +15,13 @@ import {
   shouldEscalate,
 } from "./interventor.js";
 import { propagateFixToProjects, getOutdatedProjects } from "./propagator.js";
-import { telegramSendFixFailure } from "./telegram.js";
-import { createMemoryClient, recallSimilarFixes, storeFixRecord } from "./memory.js";
+import { telegramSendFixFailure, telegramSendCoalitionAlert, telegramSendConflictAlert, telegramSendConvergenceWarning } from "./telegram.js";
+import { createMemoryClient, recallSimilarFixes, storeFixRecord, storeCoalitionPattern, storeConflictPattern } from "./memory.js";
+import { buildCoalitionSnapshot, computeHealthMetrics } from "./coalition-monitor.js";
+import { createConvergenceTracker } from "./convergence-tracker.js";
+import type { ConvergenceTracker } from "./convergence-tracker.js";
+import { detectConflicts, formatConflictResolution } from "./conflict-resolver.js";
+import { determineStrategicActions, executeStrategicAction } from "./strategic-interventor.js";
 import type {
   MonitorConfig,
   MonitorCycleResult,
@@ -24,10 +29,17 @@ import type {
   SupervisorTelegramConfig,
   FixRecord,
   MemorySearchResult,
+  CoalitionMonitorConfig,
+  CoalitionCycleResult,
+  MemoryConfig,
 } from "./types.js";
 
 /** In-memory restart tracker: projectName → { phase, count } */
 const restartHistory = new Map<string, { phase: number | null; count: number }>();
+
+/** In-memory convergence tracker — persists across monitor cycles. */
+let coalitionTracker: ConvergenceTracker | null = null;
+let lastCoalitionSnapshot: import("./types.js").CoalitionSnapshot | null = null;
 
 /**
  * Get restart count for a project+phase. Resets if phase changed.
@@ -50,7 +62,7 @@ function incrementRestartCount(projectName: string, phase: number | null): void 
  * Run a single monitoring cycle.
  * Reads registry, checks each running project, classifies stalls, executes recovery.
  */
-export async function runMonitorCycle(config: MonitorConfig): Promise<MonitorCycleResult> {
+export async function runMonitorCycle(config: MonitorConfig, coalitionConfig?: CoalitionMonitorConfig): Promise<MonitorCycleResult> {
   const result: MonitorCycleResult = {
     projectsChecked: 0,
     stalled: 0,
@@ -133,6 +145,19 @@ export async function runMonitorCycle(config: MonitorConfig): Promise<MonitorCyc
   }
 
   writeCentralRegistry(registry, config.registryPath);
+
+  // Phase 12: Coalition monitoring cycle (additive — runs after per-project checks)
+  if (coalitionConfig) {
+    const memoryConfig = loadMemoryConfig();
+    const tgConfig = config.telegramToken && config.telegramChatId
+      ? { token: config.telegramToken, chatId: config.telegramChatId }
+      : null;
+    try {
+      await runCoalitionCycle(coalitionConfig, memoryConfig, tgConfig, config.improvementLogPath);
+    } catch (err) {
+      console.error("Coalition cycle error:", err);
+    }
+  }
 
   console.log(
     `Monitor cycle complete: ${result.projectsChecked} checked, ${result.stalled} stalled, ${result.recovered} recovered, ${result.escalated} escalated, ${result.interventionsAttempted} interventions`,
@@ -319,6 +344,153 @@ function deduplicateFixes(fixes: MemorySearchResult[]): MemorySearchResult[] {
 }
 
 /**
+ * Run a coalition monitoring cycle.
+ * Builds snapshot → tracks convergence → detects conflicts → determines actions → logs + notifies.
+ * Only runs when a coalition is active (manifest has modules with running slices).
+ */
+export async function runCoalitionCycle(
+  coalitionConfig: CoalitionMonitorConfig,
+  memoryConfig: MemoryConfig,
+  telegramConfig: SupervisorTelegramConfig | null,
+  improvementLogPath: string,
+): Promise<CoalitionCycleResult> {
+  const result: CoalitionCycleResult = {
+    coalitionActive: false,
+    snapshot: null,
+    convergence: null,
+    actionsEmitted: [],
+    conflictsResolved: 0,
+    patternsStored: 0,
+  };
+
+  // Step 1: Build coalition snapshot
+  const snapshot = buildCoalitionSnapshot(coalitionConfig);
+  if (!snapshot || (snapshot.activeAgents === 0 && snapshot.runningSlices === 0)) {
+    return result;
+  }
+
+  result.coalitionActive = true;
+  result.snapshot = snapshot;
+
+  // Step 2: Initialize or use existing convergence tracker
+  if (!coalitionTracker) {
+    coalitionTracker = createConvergenceTracker(
+      coalitionConfig.convergenceWindowSize,
+      coalitionConfig.spinningThreshold,
+    );
+  }
+
+  // Compute elapsed hours since last snapshot
+  let elapsedHours = 1;
+  if (lastCoalitionSnapshot) {
+    const lastTime = new Date(lastCoalitionSnapshot.timestamp).getTime();
+    const nowTime = new Date(snapshot.timestamp).getTime();
+    elapsedHours = Math.max((nowTime - lastTime) / (1000 * 60 * 60), 0.01);
+  }
+
+  // Step 3: Add snapshot to convergence tracker
+  const convergence = coalitionTracker.addSnapshot(snapshot);
+  result.convergence = convergence;
+  lastCoalitionSnapshot = snapshot;
+
+  // Step 4: Detect conflicts if enabled
+  let conflicts = null;
+  if (coalitionConfig.conflictCheckEnabled) {
+    conflicts = detectConflicts(coalitionConfig.projectPath, coalitionConfig.manifestPath);
+  }
+
+  // Step 5: Determine strategic actions
+  const actions = determineStrategicActions(snapshot, convergence, conflicts, coalitionConfig);
+  result.actionsEmitted = actions;
+
+  // Step 6: Execute each action and log
+  for (const action of actions) {
+    const executed = executeStrategicAction(action, coalitionConfig);
+
+    // Log to improvement log
+    const metrics = computeHealthMetrics(snapshot, lastCoalitionSnapshot, elapsedHours);
+    appendToImprovementLog(
+      {
+        timestamp: new Date().toISOString(),
+        project: coalitionConfig.projectPath,
+        phase: null,
+        stallType: "execution_error",
+        action: action.type,
+        outcome: executed ? "executed" : "escalated",
+        details: action.reason,
+        coalitionHealth: snapshot.healthStatus,
+        convergenceTrend: convergence.trend,
+        strategicActions: actions.map((a) => a.type),
+        conflictResolution: conflicts ? formatConflictResolution(conflicts) : undefined,
+      },
+      improvementLogPath,
+    );
+
+    // Step 7: Send Telegram for escalations or health changes
+    if (telegramConfig) {
+      if (action.type === "escalate") {
+        await telegramSendCoalitionAlert(telegramConfig, snapshot, actions);
+      }
+    }
+  }
+
+  // Send Telegram alerts for non-healthy status even without strategic actions
+  if (telegramConfig && snapshot.healthStatus !== "healthy" && actions.length === 0) {
+    // Only alert on degraded+ status changes
+    if (snapshot.healthStatus === "critical" || snapshot.healthStatus === "spinning") {
+      await telegramSendCoalitionAlert(telegramConfig, snapshot, []);
+    }
+  }
+
+  // Send conflict alert
+  if (telegramConfig && conflicts?.hasConflict) {
+    await telegramSendConflictAlert(telegramConfig, conflicts);
+    result.conflictsResolved++;
+  }
+
+  // Send convergence warning
+  if (telegramConfig && convergence.isSpinning) {
+    await telegramSendConvergenceWarning(telegramConfig, convergence);
+  }
+
+  // Step 8: Store patterns in SuperMemory
+  if (coalitionConfig.crossProjectLearning) {
+    const memoryClient = createMemoryClient(memoryConfig);
+    if (memoryClient) {
+      const metrics = computeHealthMetrics(snapshot, lastCoalitionSnapshot, elapsedHours);
+
+      // Store coalition pattern for non-healthy states
+      if (snapshot.healthStatus !== "healthy" && actions.length > 0) {
+        const stored = await storeCoalitionPattern(memoryClient, {
+          type: snapshot.healthStatus,
+          description: `Coalition ${snapshot.healthStatus}: ${actions.map((a) => a.type).join(", ")}`,
+          metrics,
+          resolution: actions.map((a) => a.type).join(", "),
+          projectPath: coalitionConfig.projectPath,
+        });
+        if (stored) result.patternsStored++;
+      }
+
+      // Store conflict pattern
+      if (conflicts?.hasConflict) {
+        const stored = await storeConflictPattern(
+          memoryClient,
+          conflicts,
+          conflicts.resolution,
+        );
+        if (stored) result.patternsStored++;
+      }
+    }
+  }
+
+  console.log(
+    `Coalition cycle complete: ${snapshot.healthStatus}, ${snapshot.completedSlices}/${snapshot.totalSlices} slices, ${actions.length} actions, ${result.patternsStored} patterns stored`,
+  );
+
+  return result;
+}
+
+/**
  * Check if another supervisor instance is running via PID file.
  */
 function isAnotherSupervisorRunning(pidPath: string): boolean {
@@ -341,7 +513,7 @@ function isAnotherSupervisorRunning(pidPath: string): boolean {
  * Start the persistent monitor loop.
  * Writes a PID file, runs cycles on interval, handles graceful shutdown.
  */
-export function startMonitor(config: MonitorConfig): void {
+export function startMonitor(config: MonitorConfig, coalitionConfig?: CoalitionMonitorConfig): void {
   // Check for duplicate instance
   if (isAnotherSupervisorRunning(config.supervisorPidPath)) {
     console.error("❌ Another supervisor instance is already running.");
@@ -356,13 +528,13 @@ export function startMonitor(config: MonitorConfig): void {
   console.log(`   PID file: ${config.supervisorPidPath}`);
 
   // Run initial cycle immediately
-  runMonitorCycle(config).catch((err) => {
+  runMonitorCycle(config, coalitionConfig).catch((err) => {
     console.error("Monitor cycle error:", err);
   });
 
   // Set up interval
   const intervalId = setInterval(() => {
-    runMonitorCycle(config).catch((err) => {
+    runMonitorCycle(config, coalitionConfig).catch((err) => {
       console.error("Monitor cycle error:", err);
     });
   }, config.intervalMs);

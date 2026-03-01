@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
-import type { MonitorConfig, InterventorConfig, MemoryConfig } from "./types.js";
+import type { MonitorConfig, InterventorConfig, MemoryConfig, CoalitionMonitorConfig } from "./types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -56,6 +56,25 @@ export function loadInterventorConfig(): InterventorConfig {
     diagnosisMaxTurns: parseInt(process.env.PIV_DIAGNOSIS_MAX_TURNS ?? "15", 10),
     fixMaxTurns: parseInt(process.env.PIV_FIX_MAX_TURNS ?? "30", 10),
     timeoutMs: parseInt(process.env.PIV_INTERVENTION_TIMEOUT_MS ?? "300000", 10),
+  };
+}
+
+/**
+ * Load coalition monitoring configuration from environment variables with sensible defaults.
+ */
+export function loadCoalitionConfig(projectPath?: string): CoalitionMonitorConfig {
+  const resolvedPath = projectPath ?? process.env.PIV_COALITION_PROJECT_PATH ?? process.cwd();
+  const manifestPath = process.env.PIV_COALITION_MANIFEST_PATH ?? join(resolvedPath, ".agents", "manifest.yaml");
+
+  return {
+    projectPath: resolvedPath,
+    manifestPath,
+    convergenceWindowSize: parseInt(process.env.PIV_COALITION_WINDOW_SIZE ?? "5", 10),
+    spinningThreshold: parseFloat(process.env.PIV_COALITION_SPINNING_THRESHOLD ?? "0.01"),
+    failureRateCritical: parseFloat(process.env.PIV_COALITION_FAILURE_CRITICAL ?? "0.5"),
+    failureRateDegraded: parseFloat(process.env.PIV_COALITION_FAILURE_DEGRADED ?? "0.2"),
+    conflictCheckEnabled: (process.env.PIV_COALITION_CONFLICT_CHECK ?? "true") === "true",
+    crossProjectLearning: (process.env.PIV_COALITION_CROSS_PROJECT ?? "true") === "true",
   };
 }
 

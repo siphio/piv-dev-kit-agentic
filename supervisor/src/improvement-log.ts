@@ -43,6 +43,23 @@ function formatEntry(entry: ImprovementLogEntry): string {
     lines.push(`- **Past Fixes Referenced:** ${entry.memoryRetrievedIds.join(", ")}`);
   }
 
+  // Phase 12 coalition fields (optional)
+  if (entry.coalitionHealth) {
+    lines.push(`- **Coalition Health:** ${entry.coalitionHealth}`);
+  }
+  if (entry.convergenceTrend) {
+    lines.push(`- **Convergence:** ${entry.convergenceTrend}`);
+  }
+  if (entry.strategicActions && entry.strategicActions.length > 0) {
+    lines.push(`- **Strategic Actions:** ${entry.strategicActions.join(", ")}`);
+  }
+  if (entry.conflictResolution) {
+    lines.push(`- **Conflict Resolution:** ${entry.conflictResolution}`);
+  }
+  if (entry.coalitionPatternId) {
+    lines.push(`- **Coalition Pattern:** ${entry.coalitionPatternId}`);
+  }
+
   lines.push("");
   return lines.join("\n");
 }
