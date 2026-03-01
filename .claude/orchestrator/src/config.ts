@@ -1,7 +1,7 @@
 // PIV Orchestrator — Environment Configuration
 
 import { basename } from "node:path";
-import type { OrchestratorConfig, PivCommand, TelegramConfig, BudgetContext, SessionBudget } from "./types.js";
+import type { OrchestratorConfig, PivCommand, TelegramConfig, BudgetContext, SessionBudget, Manifest, MissionConfig } from "./types.js";
 import { calculateBudget } from "./budget-calculator.js";
 
 const SESSION_DEFAULTS: Record<PivCommand, { maxTurns: number; timeoutMs: number }> = {
@@ -51,6 +51,24 @@ export function loadConfig(): OrchestratorConfig {
 
 export function getSessionDefaults(command: PivCommand): { maxTurns: number; timeoutMs: number } {
   return SESSION_DEFAULTS[command];
+}
+
+/**
+ * Get Mission Controller configuration from manifest settings or defaults.
+ */
+export function getMissionConfig(manifest?: Manifest): MissionConfig {
+  const settings = manifest?.settings as Record<string, unknown> | undefined;
+  return {
+    maxConcurrentAgents: typeof settings?.max_concurrent_agents === "number"
+      ? settings.max_concurrent_agents
+      : 3,
+    missionBudgetUsd: typeof settings?.mission_budget_usd === "number"
+      ? settings.mission_budget_usd
+      : 50.0,
+    agentModel: typeof settings?.agent_model === "string"
+      ? settings.agent_model
+      : "claude-sonnet-4-6",
+  };
 }
 
 /**

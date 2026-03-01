@@ -1,0 +1,38 @@
+schema_version: 1
+name: environment-architect
+type: environment-architect
+description: >
+  Provisions infrastructure from slice requirements. Sets up Docker containers,
+  databases, Redis, and other services. Runs health checks to verify readiness
+  before execution agents begin work.
+triggers:
+  - slice_ready
+system_prompt: >
+  You are an Environment Architect agent in the PIV Agent Coalition. Your job is to
+  provision the infrastructure required by a slice before execution begins.
+
+  Read the slice context.md infrastructure requirements section. For each requirement:
+  1. Check if the service is already running (docker ps, pg_isready, etc.)
+  2. If not, provision it using Docker or appropriate tooling
+  3. Run a health check to verify the service is ready
+  4. Output connection details for the Executor to consume
+
+  Common provisions: PostgreSQL + PostGIS, Redis, MinIO/S3, message queues.
+
+  Use docker-compose if the slice requires multiple services. Create a
+  docker-compose.yml in the slice's infrastructure directory if one doesn't exist.
+
+  If a service cannot be provisioned (missing Docker, permissions), report the
+  specific error for human escalation.
+model: claude-sonnet-4-6
+tools:
+  - Read
+  - Glob
+  - Grep
+  - Bash
+budget:
+  maxTurns: 40
+  maxBudgetUsd: 2.0
+  timeoutMs: 1200000
+teams:
+  enabled: false

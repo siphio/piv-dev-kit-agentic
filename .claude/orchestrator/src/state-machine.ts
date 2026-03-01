@@ -195,13 +195,23 @@ export function determineNextAction(manifest: Manifest): NextAction {
     };
   }
 
-  // 5b: Monorepo slice progression (before flat phase logic)
+  // 5b: Monorepo mode — check for Mission Controller routing
   if (isMonorepoManifest(manifest)) {
     const workUnit = getNextUnfinishedWorkUnit(manifest);
     if (!workUnit) {
       return {
         command: "done",
         reason: "All slices complete",
+        confidence: "high",
+      };
+    }
+
+    // If architecture.md exists, route to Mission Controller for parallel execution
+    // The Mission Controller handles its own DAG-based planning and spawning
+    if ((manifest as unknown as Record<string, unknown>)._hasArchitectureMd) {
+      return {
+        command: "mission-controller",
+        reason: "Monorepo with architecture.md — Mission Controller handles parallel execution",
         confidence: "high",
       };
     }

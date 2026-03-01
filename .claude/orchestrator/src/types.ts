@@ -425,3 +425,92 @@ export interface OrchestratorConfig {
   mode: OrchestratorMode;
   registryEnabled: boolean;
 }
+
+// --- Mission Controller Types ---
+
+export type AgentType =
+  | "environment-architect"
+  | "executor"
+  | "pipeline-validator"
+  | "quality-iterator"
+  | "external-service-controller"
+  | "research-agent"
+  | "integration-agent";
+
+export type LifecycleEvent =
+  | "slice_ready"
+  | "execution_complete"
+  | "validation_failed"
+  | "quality_gate_passed"
+  | "integration_ready"
+  | "agent_crash"
+  | "module_complete";
+
+export interface AgentYamlConfig {
+  schema_version: number;
+  name: string;
+  type: AgentType;
+  description: string;
+  triggers: LifecycleEvent[];
+  system_prompt: string;
+  model?: string;
+  tools?: string[];
+  budget?: { maxTurns?: number; maxBudgetUsd?: number; timeoutMs?: number };
+  teams?: { enabled: boolean; max_teammates?: number };
+}
+
+export interface DependencyEdge {
+  from: { module: string; slice: string };
+  to: { module: string; slice: string };
+  type: "data" | "schema" | "infrastructure" | "types";
+}
+
+export interface DAGNode {
+  module: string;
+  slice: string;
+  dependencies: DependencyEdge[];
+  dependents: DependencyEdge[];
+  status: "blocked" | "ready" | "running" | "complete" | "failed";
+  assignedAgent?: string;
+}
+
+export interface MissionPlan {
+  nodes: DAGNode[];
+  parallelStreams: DAGNode[][];
+  totalSlices: number;
+  maxParallelism: number;
+}
+
+export interface AgentSession {
+  id: string;
+  agentType: AgentType;
+  module: string;
+  slice: string;
+  sessionId?: string;
+  startedAt: number;
+  status: "spawning" | "running" | "complete" | "failed" | "crashed";
+  costUsd: number;
+  retryCount: number;
+}
+
+export interface ResourceState {
+  activeAgents: AgentSession[];
+  maxConcurrent: number;
+  totalCostUsd: number;
+  budgetLimitUsd: number;
+  queuedWork: DAGNode[];
+}
+
+export interface EventPayload {
+  module: string;
+  slice: string;
+  agentType?: AgentType;
+  details?: string;
+  timestamp: number;
+}
+
+export interface MissionConfig {
+  maxConcurrentAgents: number;
+  missionBudgetUsd: number;
+  agentModel: string;
+}

@@ -9,6 +9,7 @@ import { hasUncommittedChanges, ensureGitRepo } from "./git-manager.js";
 import { registerInstance, deregisterInstance, claimBotOwnership } from "./instance-registry.js";
 import { startSignalWatcher, stopSignalWatcher, clearSignal } from "./signal-handler.js";
 import { writeHeartbeat } from "./heartbeat.js";
+import { isMonorepoManifest } from "./types.js";
 import { existsSync } from "node:fs";
 import { join, basename } from "node:path";
 import { Bot } from "grammy";
@@ -300,7 +301,13 @@ async function main(): Promise<void> {
     if (cliArgs.phase !== undefined) {
       console.log(`\n🎯 Running Phase ${cliArgs.phase} only\n`);
       await runPhase(cliArgs.phase, projectDir, notifier, pauseCheck);
+    } else if (isMonorepoManifest(manifest) && existsSync(join(projectDir, "context/architecture.md"))) {
+      // Mission Controller mode — parallel DAG-based agent execution
+      console.log("\n🎯 Monorepo detected with architecture.md — using Mission Controller\n");
+      const { runMission } = await import("./mission-controller.js");
+      await runMission(projectDir, notifier, pauseCheck);
     } else {
+      // Classic mode — sequential phase runner
       await runAllPhases(projectDir, notifier, pauseCheck, isRestart);
     }
     state.running = false;
